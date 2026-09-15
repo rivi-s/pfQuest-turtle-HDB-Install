@@ -1,0 +1,968 @@
+local original_UpdateNodes = pfMap.UpdateNodes
+local original_UpdateNode = pfMap.UpdateNode
+
+local continentPins = {}
+local maxContinentPins = 2000
+local continentRenderLastKey
+local continentRenderLastAt = 0
+
+local CONTINENT_DEBUG = false
+local function DebugPrint(msg)
+    if CONTINENT_DEBUG then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc[ContinentPins]|r " .. msg)
+    end
+end
+
+-- ============================================================================
+-- WorldMapArea-style zone bounding boxes, in world coordinates.
+-- Format: {width, height, left, top}
+-- ============================================================================
+local mapData = {
+    -- Eastern Kingdoms zones (instance 0)
+    [1429] = {3470.84, 2314.62, 1535.42, -7939.58},     -- Elwynn Forest
+    [1436] = {3500.00, 2333.3, 3016.67, -9400},         -- Westfall
+    [1433] = {2170.84, 1447.9, -1570.83, -8575},        -- Redridge Mountains
+    [1431] = {2700.00, 1800.03, 833.333, -9716.67},     -- Duskwood
+    [1434] = {6381.25, 4254.1, 2220.83, -11168.8},      -- Stranglethorn Vale
+    [1453] = {1737.50, 1158.34, 1722.92, -7995.83},     -- Stormwind City
+    [1426] = {4925.00, 3283.34, 1802.08, -3877.08},     -- Dun Morogh
+    [1455] = {790.63, 527.61, -713.591, -4569.24},      -- Ironforge
+    [1432] = {2758.33, 1839.58, -1993.75, -4487.5},     -- Loch Modan
+    [1437] = {4135.42, 2756.25, -389.583, -2147.92},    -- Wetlands
+    [1424] = {3200.00, 2133.33, 1066.67, 400},          -- Hillsbrad Foothills
+    [1416] = {2800.00, 1866.667, 783.333, 1500},        -- Alterac Mountains
+    [1417] = {3600.00, 2400.00, -866.667, -133.333},    -- Arathi Highlands
+    [1425] = {3850.00, 2566.67, -1575, 1466.67},        -- The Hinterlands
+    [1420] = {4518.75, 3012.5, 3033.33, 3837.5},        -- Tirisfal Glades
+    [1421] = {4200.00, 2800.00, 3450, 1666.67},         -- Silverpine Forest
+    [1458] = {959.38, 640.1, 873.193, 1877.94},         -- Undercity
+    [1422] = {4300.00, 2866.67, 416.667, 3366.67},      -- Western Plaguelands
+    [1423] = {4031.25, 2687.5, -2287.5, 3704.17},       -- Eastern Plaguelands
+    [1418] = {2487.50, 1658.34, -2079.17, -5889.58},    -- Badlands
+    [1427] = {2231.253, 1487.5, -322.917, -6100},       -- Searing Gorge
+    [1428] = {2929.163, 1952.08, -266.667, -7031.25},   -- Burning Steppes
+    [1435] = {2293.75, 1529.17, -2222.92, -9620.83},    -- Swamp of Sorrows
+    [1419] = {3350.00, 2233.30, -1241.67, -10566.7},    -- Blasted Lands
+    [1430] = {2500.00, 1666.63, -833.333, -9866.67},    -- Deadwind Pass
+    -- Kalimdor zones (instance 1)
+    [1438] = {5091.66, 3393.7, 3814.58, 11831.2},       -- Teldrassil
+    [1457] = {1058.33, 705.71, 2938.36, 10238.3},       -- Darnassus
+    [1439] = {6550.00, 4366.66, 2941.67, 8333.33},      -- Darkshore
+    [1440] = {5766.67, 3843.75, 1700, 4672.92},         -- Ashenvale
+    [1442] = {4883.33, 3256.25, 3245.83, 2916.67},      -- Stonetalon Mountains
+    [1413] = {10133.34, 6756.25, 2622.92, 1612.5},      -- The Barrens
+    [1411] = {5287.5, 3525, -1962.5, 1808.33},          -- Durotar
+    [1454] = {1402.61, 935.42, -3680.6, 2273.88},       -- Orgrimmar
+    [1412] = {5137.5, 3425.00, 2047.92, -272.917},      -- Mulgore
+    [1456] = {1043.75, 695.83, 516.667, -850},          -- Thunder Bluff
+    [1443] = {4495.83, 2997.91, 4233.33, 452.083},      -- Desolace
+    [1444] = {6950.00, 4633.33, 5441.67, -2366.67},     -- Feralas
+    [1441] = {4400.00, 2933.33, -433.333, -3966.67},    -- Thousand Needles
+    [1446] = {6900.00, 4600.00, -218.75, -5875},        -- Tanaris
+    [1449] = {3700.00, 2466.66, 533.333, -5966.67},     -- Un'Goro Crater
+    [1451] = {3483.33, 2322.92, 2537.5, -5958.33},      -- Silithus
+    [1445] = {5250.00, 3500.00, -975, -2033.33},        -- Dustwallow Marsh
+    [1452] = {7100.00, 4733.33, -316.667, 8533.33},     -- Winterspring
+    [1447] = {5070.84, 3381.25, -3277.08, 5341.67},     -- Azshara
+    [1448] = {5750.00, 3833.33, 1641.67, 7133.33},      -- Felwood
+    [1450] = {2308.33, 1539.59, -1381.25, 8491.67},     -- Moonglade
+    -- Continents
+    [1415] = {40500.00, 23700.00, 18500.00, 7500.00},  -- Eastern Kingdoms continent
+    [1414] = {36799.81, 24533.20, 17066.60, 12799.90},  -- Kalimdor continent
+}
+
+local zoneToUiMapID = {
+    -- Eastern Kingdoms
+    [12] = 1429, [40] = 1436, [44] = 1433, [10] = 1431, [33] = 1434,
+    [1519] = 1453, [1] = 1426, [1537] = 1455, [38] = 1432, [11] = 1437,
+    [267] = 1424, [36] = 1416, [45] = 1417, [47] = 1425, [85] = 1420,
+    [130] = 1421, [1497] = 1458, [28] = 1422, [139] = 1423, [3] = 1418,
+    [51] = 1427, [46] = 1428, [8] = 1435, [4] = 1419, [41] = 1430,
+    -- Kalimdor
+    [141] = 1438, [1657] = 1457, [148] = 1439, [331] = 1440, [406] = 1442,
+    [17] = 1413, [14] = 1411, [1637] = 1454, [215] = 1412, [1638] = 1456,
+    [405] = 1443, [357] = 1444, [400] = 1441, [440] = 1446, [490] = 1449,
+    [1377] = 1451, [15] = 1445, [618] = 1452, [16] = 1447, [361] = 1448,
+    [493] = 1450,
+}
+
+-- Custom zones are not represented by Blizzard's WorldMapArea data. Their
+-- normalized bounds are measured from the client continent map; add future
+-- custom-zone calibrations here without altering the projection code.
+local customContinentTransforms = {
+    -- Alah'Thalas: Eastern Kingdoms. Fitted from Warden Sira Moonwarden
+    -- (26.7 / 25.9 -> 50.9 / 13.0) and Marrondra
+    -- (35.7 / 32.5 -> 51.3 / 13.3).
+    [2040] = { continent = 2, left = 0.49713, top = 0.11823, width = 0.04444, height = 0.04545 },
+    -- Moonwhisper Coast: north-east of Kalimdor, visible on the client map.
+    -- Calibrated against Gordnak (51.89 / 36.61) at Kalimdor 61.1 / 18.9.
+    [5642] = { continent = 1, left = 0.445, top = -0.016, width = 0.32, height = 0.56 },
+    -- Blackstone Island: east of Durotar. The Turtle client exposes this as
+    -- its own map, without a Blizzard WorldMapArea rectangle, so it needs a
+    -- calibrated continent-space transform.
+    [5536] = { continent = 1, left = 0.632, top = 0.484, width = 0.0672, height = 0.0679 },
+    -- Thalassian Highlands: a Turtle map without a WorldMapArea rectangle.
+    -- Calibrated from the same player position on its zone and Eastern
+    -- Kingdoms maps; this is safe on both clean and enhanced clients.
+    [5225] = { continent = 2, left = 0.489112, top = 0.107562, width = 0.076099, height = 0.086962 },
+}
+
+-- City maps have no meaningful regional fog. Use the character's visit record
+-- instead, including Alah'Thalas and the normal capital-city map IDs.
+local cityVisitMaps = {
+    [1497] = true, [1519] = true, [1537] = true, [1637] = true,
+    [1638] = true, [1657] = true, [2040] = true,
+}
+
+local function GetZoneData(zoneID)
+    return pfDB and pfDB["zones"] and pfDB["zones"]["data"] and pfDB["zones"]["data"][zoneID]
+end
+
+-- Exploration overlays belong to the map currently shown by the client. Some
+-- Turtle zones (Alah'Thalas is the important example) are stored as a child
+-- rectangle inside another map, so their quest coordinates need to be lifted
+-- into that parent map before they can be compared with cached overlays.
+-- Direct ClassicAPI results are kept separately from the saved clean-client
+-- cache. They are warmed gradually, never queried from the pin-render loop.
+local directExplorationBounds = {}
+local directExplorationKnown = {}
+
+local function GetExplorationBounds(zoneID, x, y)
+    local exploredAreas = pfMap.exploredAreas
+    if not exploredAreas then return nil, x, y end
+
+    if cityVisitMaps[zoneID] and pfMap.IsMapVisited then
+        if pfMap:IsMapVisited(zoneID) then return nil, x, y end
+        return {}, x, y
+    end
+
+    -- Prefer the freshly updated saved state for the current map. Other maps
+    -- use the direct cache if it has been warmed, then the clean-client cache.
+    local playerMapID = pfMap.GetPlayerMapID and pfMap:GetPlayerMapID()
+    local explored = exploredAreas[zoneID]
+    if zoneID == playerMapID and explored then return explored, x, y end
+    if directExplorationKnown[zoneID] and directExplorationBounds[zoneID] then
+        return directExplorationBounds[zoneID], x, y
+    end
+    if explored then return explored, x, y end
+
+    local seen = {}
+    while zoneID and not seen[zoneID] do
+        seen[zoneID] = true
+        local zoneData = GetZoneData(zoneID)
+        if not zoneData or not zoneData[1] or not zoneData[2] or not zoneData[3] or not zoneData[4] or not zoneData[5] then
+            break
+        end
+
+        -- zoneData is { parent, width, height, centerX, centerY } in percent.
+        x = zoneData[4] - zoneData[2] / 2 + zoneData[2] * (x / 100)
+        y = zoneData[5] - zoneData[3] / 2 + zoneData[3] * (y / 100)
+        zoneID = zoneData[1]
+
+        explored = exploredAreas[zoneID]
+        if explored then return explored, x, y end
+    end
+
+    return nil, x, y
+end
+
+-- Continent assignments (2 = Eastern Kingdoms, 1 = Kalimdor)
+local zoneContinent = {
+    [1] = 2, [3] = 2, [4] = 2, [8] = 2, [10] = 2, [11] = 2, [12] = 2, [28] = 2,
+    [33] = 2, [36] = 2, [38] = 2, [40] = 2, [41] = 2, [44] = 2, [45] = 2, [46] = 2,
+    [47] = 2, [51] = 2, [85] = 2, [130] = 2, [139] = 2, [267] = 2, [1497] = 2,
+    [1519] = 2, [1537] = 2,
+    [14] = 1, [15] = 1, [16] = 1, [17] = 1, [141] = 1, [148] = 1, [215] = 1,
+    [331] = 1, [357] = 1, [361] = 1, [400] = 1, [405] = 1, [406] = 1, [440] = 1,
+    [490] = 1, [493] = 1, [618] = 1, [1377] = 1, [1637] = 1, [1638] = 1, [1657] = 1,
+}
+
+local function IsSameZoneFamily(firstID, secondID)
+    if not firstID or not secondID then return false end
+    if firstID == secondID then return true end
+    local seen = {}
+    local function AddParents(zoneID)
+        while zoneID and not seen[zoneID] do
+            seen[zoneID] = true
+            local data = GetZoneData(zoneID)
+            zoneID = data and data[1]
+        end
+    end
+    AddParents(firstID)
+    while secondID do
+        if seen[secondID] then return true end
+        local data = GetZoneData(secondID)
+        secondID = data and data[1]
+    end
+    return false
+end
+
+local function GetZoneContinent(zoneID)
+    local custom = customContinentTransforms[zoneID]
+    if custom then
+        return custom.continent
+    end
+
+    if zoneContinent[zoneID] then
+        return zoneContinent[zoneID]
+    end
+
+    local zoneData = GetZoneData(zoneID)
+    if zoneData and zoneData[1] then
+        local continent = zoneData[1]
+        if continent == 0 then
+            continent = 2
+        elseif continent == 1 then
+            continent = 1
+        else
+            return nil
+        end
+
+        zoneContinent[zoneID] = continent
+        return continent
+    end
+
+    return nil
+end
+
+-- Warm optional ClassicAPI fog data one zone at a time. A map redraw only
+-- reads this cache; it never triggers a cross-zone API query itself.
+local explorationQueue, explorationQueueIndex, explorationQueueKey = {}, 1, nil
+local explorationElapsed, explorationRefreshElapsed = 0, 0
+local explorationChanged = false
+
+local function QueueExplorationWarmup(continent, viewKey)
+    if not (pfQuestCompat and pfQuestCompat.optional and pfQuestCompat.optional.mapExploration and pfMap.GetExploredBounds and pfMap.nodes) then return false end
+    if explorationQueueKey == viewKey then return true end
+
+    explorationQueue, explorationQueueIndex, explorationQueueKey = {}, 1, viewKey
+    local queued = {}
+    local function QueueZone(zoneID)
+        local zoneContinent = GetZoneContinent(zoneID)
+        if (continent == 0 or zoneContinent == continent) and not directExplorationKnown[zoneID]
+            and not (pfMap.exploredAreas and pfMap.exploredAreas[zoneID]) and not queued[zoneID] then
+            queued[zoneID] = true
+            table.insert(explorationQueue, zoneID)
+        end
+    end
+
+    -- The node table grows as maps are visited, so seed from the known map
+    -- catalog first. This lets login warm both continents before either map
+    -- view has been opened.
+    for zoneID in pairs(zoneContinent) do QueueZone(zoneID) end
+    for zoneID in pairs(customContinentTransforms) do QueueZone(zoneID) end
+    for _, addonData in pairs(pfMap.nodes) do
+        for zoneID in pairs(addonData) do QueueZone(zoneID) end
+    end
+    return true
+end
+
+local explorationWarmFrame = CreateFrame("Frame")
+explorationWarmFrame:SetScript("OnUpdate", function()
+    if pfQuest_config["hideunexplored"] ~= "1" or explorationQueueIndex > table.getn(explorationQueue) then return end
+    explorationElapsed = explorationElapsed + (arg1 or 0)
+    explorationRefreshElapsed = explorationRefreshElapsed + (arg1 or 0)
+    if explorationElapsed < 0.05 then return end
+    explorationElapsed = 0
+
+    local zoneID = explorationQueue[explorationQueueIndex]
+    explorationQueueIndex = explorationQueueIndex + 1
+    local bounds = pfMap.GetExploredBounds(zoneID)
+    directExplorationKnown[zoneID] = true
+    directExplorationBounds[zoneID] = bounds
+    if bounds then
+        -- Persist the result per character so future continent views do not
+        -- need to warm the same zone again after a reload.
+        pfMap.exploredAreas[zoneID] = bounds
+    end
+    explorationChanged = true
+
+    -- Redraw in batches rather than once per API result.
+    if explorationChanged and (explorationRefreshElapsed >= 0.5 or explorationQueueIndex > table.getn(explorationQueue)) then
+        explorationChanged, explorationRefreshElapsed = false, 0
+        if WorldMapFrame:IsShown() then pfMap:UpdateNodes() end
+    end
+end)
+
+local function ZoneToWorld(x, y, zoneID)
+    local uiMapID = zoneToUiMapID[zoneID]
+    if not uiMapID then
+        return nil, nil
+    end
+    local data = mapData[uiMapID]
+    if not data then
+        return nil, nil
+    end
+
+    local worldX = data[3] - data[1] * (x / 100)
+    local worldY = data[4] - data[2] * (y / 100)
+
+    return worldX, worldY
+end
+
+-- continent: 1 = Kalimdor, 2 = Eastern Kingdoms
+local function WorldToContinent(worldX, worldY, continent)
+    local contData = mapData[continent == 1 and 1414 or 1415]
+    if not contData then
+        return nil, nil
+    end
+
+    local x = (contData[3] - worldX) / contData[1]
+    local y = (contData[4] - worldY) / contData[2]
+
+    return x, y
+end
+
+local function ZoneToContinent(x, y, zoneID, continent)
+    local custom = customContinentTransforms[zoneID]
+    if custom then
+        if custom.continent ~= continent then
+            return nil, nil
+        end
+        return custom.left + custom.width * (x / 100), custom.top + custom.height * (y / 100)
+    end
+
+    local worldX, worldY = ZoneToWorld(x, y, zoneID)
+    if not worldX or not worldY then
+        return nil, nil
+    end
+    return WorldToContinent(worldX, worldY, continent)
+end
+
+local function NodeAnimate(self, max)
+    return
+end
+
+local inverseMapScale = 1.0
+local function ResizeContinentNode(frame)
+    if not frame.icon then
+        frame.defsize = tonumber(pfQuest_config["continentNodeSize"]) or 12
+        frame.defsize = frame.defsize * inverseMapScale
+    else
+        frame.defsize = tonumber(pfQuest_config["continentUtilityNodeSize"]) or 14
+        frame.defsize = (frame.defsize - 2) * inverseMapScale + 2
+    end
+    frame:SetWidth(frame.defsize)
+    frame:SetHeight(frame.defsize)
+    frame.hl:SetWidth(frame.defsize)
+    frame.hl:SetHeight(frame.defsize)
+end
+
+local lastResize = 0
+local doResize = false
+
+local nodeResizeFrame = CreateFrame("Frame")
+nodeResizeFrame:SetScript("OnUpdate", function()
+    lastResize = lastResize + (arg1 or 0)
+    if doResize and lastResize >= 1 then
+        lastResize = 0
+        doResize = false
+
+        pfMap:UpdateNodes()
+
+        local i = 1
+        if continentPins then
+            while continentPins[i] and continentPins[i]:IsShown() do
+                ResizeContinentNode(continentPins[i])
+                i = i + 1
+            end
+        end
+    end
+end)
+
+local function ResizeContinentNodes()
+    doResize = true
+end
+
+local function OnMapScaleChanged(frame, scale, originalfunction)
+    originalfunction(frame, scale)
+
+    local newInverseScale = 1.0 / WorldMapButton:GetEffectiveScale()
+    if (inverseMapScale ~= newInverseScale) then
+        inverseMapScale = newInverseScale
+        ResizeContinentNodes()
+    end
+end
+
+local originalWorldMapFrame_SetScale = WorldMapFrame.SetScale
+WorldMapFrame.SetScale = function(frame, scale)
+    OnMapScaleChanged(frame, scale, originalWorldMapFrame_SetScale)
+end
+local originalWorldMapDetailFrame_SetScale = WorldMapDetailFrame.SetScale
+WorldMapDetailFrame.SetScale = function(frame, scale)
+    OnMapScaleChanged(frame, scale, originalWorldMapDetailFrame_SetScale)
+end
+local originalWorldMapButton_SetScale = WorldMapButton.SetScale
+WorldMapButton.SetScale = function(frame, scale)
+    OnMapScaleChanged(frame, scale, originalWorldMapButton_SetScale)
+end
+
+local function ConfigureContinentPinInteraction(pin, force)
+    local clickThrough = pfQuest_config["continentClickThrough"] == "1"
+    if not force and pin.clickThrough == clickThrough then return end
+    pin.clickThrough = clickThrough
+
+    if clickThrough then
+        pin:EnableMouse(false)
+        pin:RegisterForClicks()
+        pin:SetScript("OnEnter", nil)
+        pin:SetScript("OnLeave", nil)
+        pin:SetScript("OnClick", function()
+            if IsControlKeyDown() and this.node and pfMap.NodeClick then
+                pfMap.NodeClick()
+            end
+        end)
+        pin:SetScript("OnUpdate", function()
+            if IsControlKeyDown() then
+                if not this.mouseEnabled then
+                    this:EnableMouse(true)
+                    this:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                    this.mouseEnabled = true
+                end
+            elseif this.mouseEnabled ~= false then
+                this:EnableMouse(false)
+                this:RegisterForClicks()
+                this.mouseEnabled = false
+            end
+
+            if not this:IsVisible() then return end
+            local x, y = GetCursorPosition()
+            local scale = this:GetEffectiveScale()
+            x, y = x / scale, y / scale
+            local left, right, top, bottom = this:GetLeft(), this:GetRight(), this:GetTop(), this:GetBottom()
+            local over = left and right and top and bottom and x >= left and x <= right and y >= bottom and y <= top
+            if over and not this.wasMouseOver then
+                if this.node then pfMap.NodeEnter() end
+                this.wasMouseOver = true
+            elseif not over and this.wasMouseOver then
+                this.pulse, this.mod = 1, 1
+                this:SetWidth(this.defsize)
+                this:SetHeight(this.defsize)
+                pfMap.NodeLeave()
+                this.wasMouseOver = false
+            end
+        end)
+    else
+        pin:EnableMouse(true)
+        pin:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        pin.mouseEnabled = true
+        pin:SetScript("OnUpdate", nil)
+        pin:SetScript("OnEnter", function()
+            if this.node then pfMap.NodeEnter() end
+            this.wasMouseOver = true
+        end)
+        pin:SetScript("OnLeave", function()
+            this.pulse, this.mod = 1, 1
+            this:SetWidth(this.defsize)
+            this:SetHeight(this.defsize)
+            pfMap.NodeLeave()
+            this.wasMouseOver = false
+        end)
+        pin:SetScript("OnClick", function()
+            if this.node and pfMap.NodeClick then pfMap.NodeClick() end
+        end)
+    end
+end
+
+local function CreateContinentPin(index)
+    if not continentPins[index] then
+        local pin = CreateFrame("Button", "pfQuestContinentPin" .. index, WorldMapButton)
+        pin.worldmap = true
+        pin.tex = pin:CreateTexture(nil, "BACKGROUND")
+        pin.tex:SetAllPoints(pin)
+        pin.pic = pin:CreateTexture(nil, "BORDER")
+        pin.pic:SetPoint("TOPLEFT", pin, "TOPLEFT", 1, -1)
+        pin.pic:SetPoint("BOTTOMRIGHT", pin, "BOTTOMRIGHT", -1, 1)
+        pin.hl = pin:CreateTexture(nil, "OVERLAY")
+        pin.hl:SetTexture(pfQuestConfig.path .. "\\img\\track")
+        pin.hl:SetPoint("TOPLEFT", pin, "TOPLEFT", -5, 5)
+        pin.hl:Hide()
+        pin.defalpha, pin.Animate, pin.dt = 1, NodeAnimate, 0
+        continentPins[index] = pin
+    end
+    ConfigureContinentPinInteraction(continentPins[index])
+    return continentPins[index]
+end
+
+local function HideContinentPin(pin)
+    if pin.wasMouseOver then
+        -- Programmatic hiding does not set the legacy global `this` to the
+        -- pin, so pfMap.NodeLeave cannot reliably choose WorldMapTooltip.
+        WorldMapTooltip:Hide()
+        pfMap.highlight = nil
+        pin.wasMouseOver = false
+    end
+    pin:Hide()
+end
+
+function pfMap:UpdateNode(frame, node, color, obj, distance)
+    original_UpdateNode(self, frame, node, color, obj, distance)
+
+    if obj == "minimap" then
+        return
+    end
+
+    ResizeContinentNode(frame)
+end
+
+local function GetGrayLevel(charLevel)
+    if charLevel <= 5 then
+        return 0
+    elseif charLevel <= 49 then
+        return charLevel - math.floor(charLevel / 10) - 5
+    elseif charLevel == 50 then
+        return 40
+    elseif charLevel <= 59 then
+        return charLevel - math.floor(charLevel / 5) - 1
+    else
+        return charLevel - 9
+    end
+end
+
+-- Where each continent sits within the combined world-view canvas.
+-- Same {width, height, left, top} format as the mapData entries above,
+local IDENTITY_LAYOUT = {1, 1, 0, 0}
+local WORLD_VIEW_LAYOUT = {
+    [1] = {0.85, 0.82, -0.20, 0.06}, -- Kalimdor (left)
+    [2] = {0.85, 0.82, 0.35, 0.06}, -- Eastern Kingdoms (right)
+}
+
+-- Capital cities have their own map IDs and their nodes are therefore absent
+-- when the player views the enclosing outdoor zone (for example Ironforge on
+-- the Dun Morogh map). Project those city nodes onto that parent zone without
+-- merging the source-node tables or changing the normal city-map renderer.
+local cityParentMaps = {
+    [1519] = 12,  -- Stormwind City -> Elwynn Forest
+    [1537] = 1,   -- Ironforge -> Dun Morogh
+    [1497] = 85,  -- Undercity -> Tirisfal Glades
+    [1637] = 14,  -- Orgrimmar -> Durotar
+    [1638] = 215, -- Thunder Bluff -> Mulgore
+    [1657] = 141, -- Darnassus -> Teldrassil
+}
+
+local function CityToParent(x, y, cityID, parentID)
+    local worldX, worldY = ZoneToWorld(x, y, cityID)
+    local parentMapID = zoneToUiMapID[parentID]
+    local parent = parentMapID and mapData[parentMapID]
+    if not worldX or not worldY or not parent then return nil, nil end
+
+    return (parent[3] - worldX) / parent[1], (parent[4] - worldY) / parent[2]
+end
+
+local function PlaceCityPinsOnParentMap(parentID, pinCount)
+    local currentZoneOnly = tonumber(pfQuest_config["trackingmethod"]) == 5
+    local playerMapID = pfMap.GetPlayerMapID and pfMap:GetPlayerMapID() or pfMap.playerMapID
+    local hideUnexplored = pfQuest_config["hideunexplored"] == "1"
+
+    for cityID, cityParentID in pairs(cityParentMaps) do
+        if cityParentID == parentID and (not currentZoneOnly or playerMapID == cityID) then
+            for addon, addonData in pairs(pfMap.nodes) do
+                local cityNodes = addonData[cityID]
+                if cityNodes then
+                    for coords, node in pairs(cityNodes) do
+                        local _, _, strx, stry = strfind(coords, "(.*)|(.*)")
+                        local x, y = tonumber(strx), tonumber(stry)
+                        local explored = hideUnexplored and GetExplorationBounds(cityID, x, y)
+                        local parentX, parentY
+                        if x and y then
+                            parentX, parentY = CityToParent(x, y, cityID, parentID)
+                        end
+
+                        if parentX and parentY and parentX >= 0 and parentX <= 1 and parentY >= 0 and parentY <= 1
+                            and not (hideUnexplored and explored and not pfMap.IsExploredPosition(explored, x, y)) then
+                            pinCount = pinCount + 1
+                            if pinCount > maxContinentPins then return pinCount end
+
+                            local pin = CreateContinentPin(pinCount)
+                            pin.node = node
+                            pin.sourceZone = cityID
+                            pfMap:UpdateNode(pin, node, nil, nil, nil)
+                            pin:ClearAllPoints()
+                            pin:SetPoint("CENTER", WorldMapButton, "TOPLEFT", parentX * WorldMapButton:GetWidth(), -parentY * WorldMapButton:GetHeight())
+
+                            if pfQuest_config["showcluster"] == "0" and pin.cluster then
+                                HideContinentPin(pin)
+                            elseif pfQuest_config["showspawn"] == "0" and addon == "PFQUEST" and not pin.texture then
+                                HideContinentPin(pin)
+                            else
+                                pin:Show()
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return pinCount
+end
+
+local function PlaceContinentPins(continent, layout, pinCount, playerLevel, processedQuests, stats)
+    local currentZoneOnly = tonumber(pfQuest_config["trackingmethod"]) == 5
+    local playerMapID = pfMap.GetPlayerMapID and pfMap:GetPlayerMapID() or pfMap.playerMapID
+    local hideUnexplored = pfQuest_config["hideunexplored"] == "1"
+    for addon, addonData in pairs(pfMap.nodes) do
+        for zID, zoneNodes in pairs(addonData) do
+            stats.zonesSeen = stats.zonesSeen + 1
+            local zoneCont = GetZoneContinent(zID)
+            local sameCurrentZone = currentZoneOnly and IsSameZoneFamily(zID, playerMapID)
+            if zoneCont == continent and (not currentZoneOnly or sameCurrentZone) then
+                stats.zonesMatched = stats.zonesMatched + 1
+                local uiMapID = zoneToUiMapID[zID]
+                if customContinentTransforms[zID] or (uiMapID and mapData[uiMapID]) then
+                    stats.zonesWithUiMapID = stats.zonesWithUiMapID + 1
+                    for coords, node in pairs(zoneNodes) do
+                        local skipNode = false
+                        local questKey = nil
+
+                        for title, data in pairs(node) do
+                            local needsDeduplication = false
+                            local isUtilityNPC = false
+
+                            if data.addon and string.find(data.addon, "TRACK_") then
+                                -- avoid over populating continent maps with crap make zone only
+                                local allowedTracks = {
+                                    "TRACK_FLIGHT", "TRACK_AUCTIONEER", "TRACK_BANKER", "TRACK_BATTLEMASTER",
+                                    "TRACK_INNKEEPER", "TRACK_MAILBOX", "TRACK_STABLEMASTER",
+                                    "TRACK_SPIRITHEALER", "TRACK_MEETINGSTONE",
+                                }
+
+                                local isAllowed = false
+                                for _, track in pairs(allowedTracks) do
+                                    if string.find(data.addon, track) then
+                                        isAllowed = true
+                                        break
+                                    end
+                                end
+
+                                if isAllowed then
+                                    isUtilityNPC = true
+                                else
+                                    skipNode = true
+                                    break
+                                end
+                            end
+
+                            -- avoid duplicate pins for zone/city pairs that overlap
+                            if
+                                (zID == 141 or zID == 1657) or (zID == 12 or zID == 1519) or
+                                    (zID == 1 or zID == 1537) or (zID == 14 or zID == 1637) or
+                                    (zID == 215 or zID == 1638) or (zID == 85 or zID == 1497)
+                            then
+                                needsDeduplication = true
+
+                                if zID == 141 or zID == 1657 then
+                                    questKey = title .. "_teldrassil"
+                                elseif zID == 12 or zID == 1519 then
+                                    questKey = title .. "_stormwind"
+                                elseif zID == 1 or zID == 1537 then
+                                    questKey = title .. "_ironforge"
+                                elseif zID == 14 or zID == 1637 then
+                                    questKey = title .. "_orgrimmar"
+                                elseif zID == 215 or zID == 1638 then
+                                    questKey = title .. "_thunderbluff"
+                                elseif zID == 85 or zID == 1497 then
+                                    questKey = title .. "_undercity"
+                                end
+                            end
+
+                            if needsDeduplication and questKey and processedQuests[questKey] then
+                                skipNode = true
+                                break
+                            end
+
+                            local questLevel = tonumber(data.qlvl) or tonumber(data.lvl) or 0
+                            local minLevel = tonumber(data.min) or 0
+
+                            if not isUtilityNPC then
+                                if pfQuest_config["showlowlevel"] == "0" then
+                                    if questLevel > 0 and questLevel <= GetGrayLevel(playerLevel) then
+                                        if not (data.texture and string.find(data.texture, "complete")) then
+                                            skipNode = true
+                                            break
+                                        end
+                                    end
+                                end
+
+                                if minLevel > playerLevel + (pfQuest_config["showhighlevel"] == "1" and 3 or 0) then
+                                    if not (data.texture and string.find(data.texture, "complete")) then
+                                        skipNode = true
+                                        break
+                                    end
+                                end
+
+                                if pfQuest_config["showlowlevel"] == "0" then
+                                    if minLevel <= 1 and questLevel <= GetGrayLevel(playerLevel) then
+                                        if not (data.texture and string.find(data.texture, "complete")) then
+                                            skipNode = true
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+
+                            if needsDeduplication and questKey and not skipNode then
+                                processedQuests[questKey] = true
+                            end
+                        end
+
+                        if not skipNode then
+                            local _, _, strx, stry = strfind(coords, "(.*)|(.*)")
+                            local zoneX = tonumber(strx)
+                            local zoneY = tonumber(stry)
+
+                            if zoneX and zoneY then
+                                -- Exploration overlays are cached only when the player has
+                                -- opened that zone normally. Unknown zones stay visible;
+                                -- hiding them would make a fresh cache look like Current
+                                -- Zone Only until the player browsed every map once.
+                                local explored, explorationX, explorationY = GetExplorationBounds(zID, zoneX, zoneY)
+                                if hideUnexplored and explored and not pfMap.IsExploredPosition(explored, explorationX, explorationY) then
+                                    skipNode = true
+                                end
+                                local contX, contY = ZoneToContinent(zoneX, zoneY, zID, continent)
+                                if not skipNode and contX and contY then
+                                    stats.nodesConverted = stats.nodesConverted + 1
+                                    if contX and contY and contX >= 0 and contX <= 1 and contY >= 0 and contY <= 1 then
+                                        pinCount = pinCount + 1
+                                        if pinCount > maxContinentPins then
+                                            break
+                                        end
+
+                                        local worldMapX = layout[3] + layout[1] * contX
+                                        local worldMapY = layout[4] + layout[2] * contY
+
+                                        local pin = CreateContinentPin(pinCount)
+                                        pin.node = node
+                                        pin.sourceContinent = continent
+                                        pin.sourceZone = zID
+
+                                        pfMap:UpdateNode(pin, node, nil, nil, nil)
+
+                                        ResizeContinentNode(pin)
+
+                                        pin:ClearAllPoints()
+                                        pin:SetPoint(
+                                            "CENTER",
+                                            WorldMapButton,
+                                            "TOPLEFT",
+                                            worldMapX * WorldMapButton:GetWidth(),
+                                            -worldMapY * WorldMapButton:GetHeight()
+                                        )
+                                        -- Match zone-map display preferences on continent/world maps.
+                                        if pfQuest_config["showcluster"] == "0" and pin.cluster then
+                                            HideContinentPin(pin)
+                                        elseif pfQuest_config["showspawn"] == "0" and addon == "PFQUEST" and not pin.texture then
+                                            HideContinentPin(pin)
+                                        else
+                                            pin:Show()
+                                        end
+
+                                        if CONTINENT_DEBUG and not stats.zonesSampled[zID] then
+                                            stats.zonesSampled[zID] = true
+                                            local zoneName = pfDB and pfDB["zones"] and pfDB["zones"]["loc"] and pfDB["zones"]["loc"][zID] or "?"
+                                            DebugPrint("zone sample: continent=" .. continent .. " zID=" .. tostring(zID) .. " name=" .. tostring(zoneName) .. " contXY=" .. string.format("%.3f,%.3f", contX, contY) .. " worldMapXY=" .. string.format("%.3f,%.3f", worldMapX, worldMapY) .. " screenXY=" .. string.format("%.0f,%.0f", worldMapX * WorldMapButton:GetWidth(), worldMapY * WorldMapButton:GetHeight()))
+                                        end
+                                    elseif not stats.sampledOutOfBounds then
+                                        stats.sampledOutOfBounds = true
+                                        DebugPrint("sample out-of-bounds: continent=" .. continent .. " zID=" .. tostring(zID) .. " zoneXY=" .. tostring(zoneX) .. "," .. tostring(zoneY) .. " contXY=" .. tostring(contX) .. "," .. tostring(contY))
+                                    end
+                                end
+                            end
+                        else
+                            stats.nodesFiltered = stats.nodesFiltered + 1
+                        end
+                    end
+                    if pinCount >= maxContinentPins then
+                        break
+                    end
+                end
+            end
+        end
+        if pinCount >= maxContinentPins then
+            break
+        end
+    end
+
+    return pinCount
+end
+
+
+local function StartContinentRender(continent, viewKey)
+    local playerLevel = UnitLevel("player")
+    local processedQuests = {}
+    local stats = { zonesSeen = 0, zonesMatched = 0, zonesWithUiMapID = 0, nodesFiltered = 0, nodesConverted = 0, sampledOutOfBounds = false, zonesSampled = {} }
+
+    local function Render()
+        local pinCount = 0
+        if continent == 0 then
+            pinCount = PlaceContinentPins(1, WORLD_VIEW_LAYOUT[1], pinCount, playerLevel, processedQuests, stats)
+            pinCount = PlaceContinentPins(2, WORLD_VIEW_LAYOUT[2], pinCount, playerLevel, processedQuests, stats)
+        else
+            pinCount = PlaceContinentPins(continent, IDENTITY_LAYOUT, pinCount, playerLevel, processedQuests, stats)
+        end
+
+        for i = pinCount + 1, maxContinentPins do
+            if continentPins[i] then HideContinentPin(continentPins[i]) end
+        end
+
+        continentRenderLastKey = viewKey
+        continentRenderLastAt = GetTime()
+        DebugPrint("done: zonesSeen=" .. stats.zonesSeen .. " zonesMatchedContinent=" .. stats.zonesMatched .. " zonesWithUiMapID=" .. stats.zonesWithUiMapID .. " nodesFiltered=" .. stats.nodesFiltered .. " nodesConverted=" .. stats.nodesConverted .. " pinsPlaced=" .. pinCount)
+    end
+
+    Render()
+
+end
+
+function pfMap:UpdateNodes()
+    local continent = GetCurrentMapContinent()
+    local zone = GetCurrentMapZone()
+    local mapName = GetMapInfo and GetMapInfo() or "?"
+    local viewKey = tostring(continent) .. ":" .. tostring(zone) .. ":" .. tostring(mapName)
+
+    original_UpdateNodes(self)
+
+    -- WORLD_MAP_UPDATE and the polling fallback can both request the same
+    -- view. Suppress duplicate redraws that arrive immediately together.
+    if continentRenderLastKey == viewKey and GetTime() - continentRenderLastAt < 0.5 then return end
+
+    for i = 1, maxContinentPins do
+        if continentPins[i] then
+            HideContinentPin(continentPins[i])
+            continentPins[i].node = nil
+            continentPins[i].sourceContinent = nil
+        end
+    end
+
+    DebugPrint("UpdateNodes: continent=" .. tostring(continent) .. " zone=" .. tostring(zone) .. " mapName=" .. tostring(mapName) .. " configOn=" .. tostring(pfQuest_config["continentPins"]))
+
+    -- A selected outdoor zone can contain a capital city with its own node
+    -- map. Render the city's projected pins here; this is independent from
+    -- the continent-pin preference because it is a zone-map behavior.
+    if zone > 0 then
+        -- Use the dropdown's selected map name before the optional current-
+        -- area API: while standing inside a capital, that API can still say
+        -- Ironforge even when the player is viewing Dun Morogh.
+        local parentID = pfMap.GetMapIDByName and pfMap:GetMapIDByName(mapName)
+        parentID = parentID or (pfMap.GetMapID and pfMap:GetMapID(continent, zone))
+        local pinCount = parentID and PlaceCityPinsOnParentMap(parentID, 0) or 0
+        for i = pinCount + 1, maxContinentPins do
+            if continentPins[i] then HideContinentPin(continentPins[i]) end
+        end
+        return
+    end
+
+    if pfQuest_config["continentPins"] == "0" then
+        DebugPrint("skip: continentPins disabled in config")
+        return
+    end
+
+    -- continent pins only apply at the top-level view of a single continent
+    -- (continent 1 or 2) or the combined world view (continent 0)
+    if continent < 0 or continent > 2 then
+        DebugPrint("skip: not a top-level continent view (zone=" .. tostring(zone) .. " continent=" .. tostring(continent) .. ")")
+        return
+    end
+
+    for _, pin in pairs(pfMap.pins) do
+        if pin then
+            pin:Hide()
+        end
+    end
+
+    if pfQuest_config["hideunexplored"] == "1" then
+        QueueExplorationWarmup(continent, viewKey)
+    end
+    StartContinentRender(continent, viewKey)
+end
+
+local continentPollFrame = CreateFrame("Frame")
+local continentPollElapsed = 0
+local lastPolledContinent, lastPolledZone
+local continentRefreshPending = false
+continentPollFrame:SetScript("OnUpdate", function()
+    if not WorldMapFrame:IsShown() then
+        return
+    end
+
+    local currentContinent = GetCurrentMapContinent()
+    local currentZone = GetCurrentMapZone()
+
+    if lastPolledContinent ~= currentContinent or lastPolledZone ~= currentZone then
+        DebugPrint("poll transition: continent " .. tostring(lastPolledContinent) .. "->" .. tostring(currentContinent) .. " zone " .. tostring(lastPolledZone) .. "->" .. tostring(currentZone) .. " mapName=" .. tostring(GetMapInfo and GetMapInfo()) .. " buttonShown=" .. tostring(WorldMapButton:IsShown()))
+        lastPolledContinent = currentContinent
+        lastPolledZone = currentZone
+        continentRefreshPending = true
+    end
+
+    -- The world map remains open while the player moves. Rebuilding every
+    -- pin on a timer here caused large maps to redraw several times a second.
+    -- A redraw is only needed after the viewed continent/zone changes.
+    if continentRefreshPending then
+      continentPollElapsed = continentPollElapsed + (arg1 or 0)
+    end
+    if continentRefreshPending and continentPollElapsed >= 0.25 then
+        continentPollElapsed = 0
+        continentRefreshPending = false
+        pfMap:UpdateNodes()
+    end
+end)
+
+local function ExtendPfQuestConfig()
+    for _, entry in pairs(pfQuest_defconfig) do
+        if entry.config == "continentPins" then
+            return
+        end
+    end
+
+    table.insert(pfQuest_defconfig, { text = "|cff33ffccContinent Map|r", type = "header" })
+    table.insert(pfQuest_defconfig, { text = "Display Continent Pins", default = "1", type = "checkbox", config = "continentPins" })
+    table.insert(pfQuest_defconfig, { text = "Require Ctrl+Click for Continent Pin Interaction", default = "1", type = "checkbox", config = "continentClickThrough" })
+    table.insert(pfQuest_defconfig, { text = "Continent Node Size", default = "12", type = "text", config = "continentNodeSize" })
+    table.insert(pfQuest_defconfig, { text = "Continent Utility Node Size", default = "14", type = "text", config = "continentUtilityNodeSize" })
+
+    table.insert(pfQuest_defconfig, { text = "|cff33ffccQuest Filters|r", type = "header" })
+    table.insert(pfQuest_defconfig, { text = "Hide Chicken Quests (CLUCK!)", default = "1", type = "checkbox", config = "hideChickenQuests" })
+    table.insert(pfQuest_defconfig, { text = "Hide Felwood Corrupted Flowers", default = "1", type = "checkbox", config = "hideFelwoodFlowers" })
+    table.insert(pfQuest_defconfig, { text = "Hide PvP/Battleground Quests", default = "1", type = "checkbox", config = "hidePvPQuests" })
+    table.insert(pfQuest_defconfig, { text = "Hide Cloth Donation Quests", default = "0", type = "checkbox", config = "hideDonationQuests" })
+
+    pfQuest_config["continentPins"] = pfQuest_config["continentPins"] or "1"
+    -- Existing installs defaulted to direct pin clicks. Migrate once so dense
+    -- island pins do not block ordinary map navigation after this update.
+    if pfQuest_config["continentClickThroughMigration"] ~= "1" then
+        pfQuest_config["continentClickThrough"] = "1"
+        pfQuest_config["continentClickThroughMigration"] = "1"
+    end
+    pfQuest_config["continentClickThrough"] = pfQuest_config["continentClickThrough"] or "1"
+    pfQuest_config["continentNodeSize"] = pfQuest_config["continentNodeSize"] or "12"
+    pfQuest_config["continentUtilityNodeSize"] = pfQuest_config["continentUtilityNodeSize"] or "14"
+    pfQuest_config["hideChickenQuests"] = pfQuest_config["hideChickenQuests"] or "1"
+    pfQuest_config["hideFelwoodFlowers"] = pfQuest_config["hideFelwoodFlowers"] or "1"
+    pfQuest_config["hidePvPQuests"] = pfQuest_config["hidePvPQuests"] or "1"
+    pfQuest_config["hideDonationQuests"] = pfQuest_config["hideDonationQuests"] or "0"
+end
+
+local f = CreateFrame("Frame")
+f:RegisterEvent("VARIABLES_LOADED")
+f:SetScript("OnEvent", function()
+    ExtendPfQuestConfig()
+end)
+if pfQuest_defconfig and pfQuest_config then ExtendPfQuestConfig() end
+
+-- On enhanced clients begin warming while the player is in the world, before
+-- they open a continent map. The small delay lets pfQuest finish populating
+-- its node tables after login.
+local startupWarmFrame = CreateFrame("Frame")
+startupWarmFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+startupWarmFrame:SetScript("OnEvent", function()
+    this.warmAt = GetTime() + 3
+end)
+startupWarmFrame:SetScript("OnUpdate", function()
+    if not this.warmAt or this.warmAt > GetTime() then return end
+    this.warmAt = nil
+    if pfQuest_config["hideunexplored"] == "1" and not QueueExplorationWarmup(0, "startup") then
+        this.warmAt = GetTime() + 2
+    end
+end)

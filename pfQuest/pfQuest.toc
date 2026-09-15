@@ -1,0 +1,12 @@
+## Interface: 11200
+## Title: |cff33ffccpf|cffffffffQuest |cff00aeff[HDB]
+## Author: Shagu, txtsd
+## Notes: A Questhelper and Database
+## Notes-ruRU: Облегченный помощник заданий и база данных
+## Version: 0.1.0-alpha.6
+## OptionalDeps: pfUI
+## SavedVariables: pfQuest_questcache, pfQuest_global
+## SavedVariablesPerCharacter: pfQuest_config, pfBrowser_fav, pfQuest_history, pfQuest_colors, pfQuest_server, pfQuest_track
+init\data.xml
+init\enUS.xml
+init\addon.xml

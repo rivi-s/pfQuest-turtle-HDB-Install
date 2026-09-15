@@ -1,0 +1,2 @@
+-- Turtle's hand-maintained database corrections are applied by the HearthDB
+-- exporter and stored in SQLite. No large runtime database tables exist here.

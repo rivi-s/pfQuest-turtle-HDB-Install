@@ -1,0 +1,15 @@
+pfDB = {
+  ["areatrigger"] = {},
+  ["items"] = { ["data"] = {}, ["enUS"] = {} },
+  ["meta"] = {},
+  ["meta-tbc"] = {},
+  ["minimap"] = {},
+  ["minimap-tbc"] = {},
+  ["objects"] = { ["data"] = {}, ["enUS"] = {} },
+  ["professions"] = {},
+  ["quests"] = { ["data"] = {}, ["enUS"] = {} },
+  ["quests-itemreq"] = { ["data"] = {} },
+  ["refloot"] = { ["data"] = {} },
+  ["units"] = { ["data"] = {}, ["enUS"] = {} },
+  ["zones"] = {},
+}

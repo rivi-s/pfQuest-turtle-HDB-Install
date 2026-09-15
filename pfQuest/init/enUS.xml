@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+  <Include file="..\db\enUS\zones.lua" />
+  <Include file="..\db\enUS\professions.lua" />
+</Ui>

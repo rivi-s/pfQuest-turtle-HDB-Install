@@ -1,0 +1,8 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+  <Include file="..\db\patches-turtle.lua"/>
+  <Include file="..\db\feature-compat.lua"/>
+  <Include file="..\db\zones-turtle.lua"/>
+  <Include file="..\db\minimap-turtle.lua"/>
+  <Include file="..\db\areatrigger-turtle.lua"/>
+  <Include file="..\db\meta-turtle.lua"/>
+</Ui>
