@@ -651,7 +651,7 @@ function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
   -- leaving zero leaderboards when a quest is ready to hand in.
   local allDone = objectives == 0 or objectives > 0
   for index = 1, objectives do
-    local text, kind, done = GetQuestLogLeaderBoard(index, qlogid)
+    local text, kind, done = compat.GetQuestLogLeaderBoard(index, qlogid)
     if not done then allDone = false end
     if kind == "monster" then
       local _, _, name, current, needed = strfind(text, pfUI.api.SanitizePattern(QUEST_MONSTERS_KILLED))
@@ -1689,7 +1689,7 @@ function pfDatabase:SearchQuestID(id, meta, maps)
 
     if objectives then
       for i = 1, objectives, 1 do
-        local text, type, done = GetQuestLogLeaderBoard(i, meta["qlogid"])
+        local text, type, done = compat.GetQuestLogLeaderBoard(i, meta["qlogid"])
 
         -- spawn data
         if type == "monster" then
@@ -2243,7 +2243,7 @@ function pfDatabase:GetQuestIDs(qid, preserveQuestLogSelection)
   -- row, which avoids a visible hitch on same-name quest chains. Custom
   -- servers can expose an internal ID that differs from the canonical ID in
   -- the database, so only trust it when its title also matches.
-  local getQuestLink = GetQuestLink or GetQuestLinkForLogIndex
+  local getQuestLink = compat.GetQuestLinkForLogIndex
   if getQuestLink then
     local ok, questLink = pcall(getQuestLink, qid)
     if ok and questLink then
@@ -2278,9 +2278,9 @@ function pfDatabase:GetQuestIDs(qid, preserveQuestLogSelection)
   end
 
   if type(pfDatabase.ResolveQuestLogIDHDB) == "function" then
-    local resolvedID, pending = pfDatabase:ResolveQuestLogIDHDB(qid, title, level, preserveQuestLogSelection)
+    local resolvedID, pending, handled = pfDatabase:ResolveQuestLogIDHDB(qid, title, level, preserveQuestLogSelection)
     if resolvedID then return { [1] = resolvedID } end
-    if pending then return end
+    if pending or handled then return end
   end
 
   local titleCandidates = pfDatabase.nameIndex.quests and pfDatabase.nameIndex.quests[title]
@@ -2339,11 +2339,11 @@ function pfDatabase:GetQuestIDs(qid, preserveQuestLogSelection)
     return
   end
 
-  local oldID = GetQuestLogSelection()
+  local oldID = compat.GetQuestLogSelection()
   local collapsedHeaders = CaptureCollapsedQuestHeaders()
-  SelectQuestLogEntry(qid)
-  local text, objective = GetQuestLogQuestText()
-  SelectQuestLogEntry(oldID)
+  compat.SelectQuestLogEntry(qid)
+  local text, objective = compat.GetQuestLogQuestText()
+  compat.SelectQuestLogEntry(oldID)
   RestoreCollapsedQuestHeaders(collapsedHeaders)
   -- Version this key when resolver rules change so stale same-title matches
   -- do not keep bypassing the improved live-objective disambiguation.
@@ -2372,7 +2372,7 @@ function pfDatabase:GetQuestIDs(qid, preserveQuestLogSelection)
   local objectiveUnits = {}
   local boardCount = GetNumQuestLeaderBoards(qid) or 0
   for board = 1, boardCount do
-    local boardText, boardType = GetQuestLogLeaderBoard(board, qid)
+    local boardText, boardType = compat.GetQuestLogLeaderBoard(board, qid)
     if boardType == "item" and boardText then
       local _, _, itemName = strfind(boardText, "^(.-):")
       if itemName then

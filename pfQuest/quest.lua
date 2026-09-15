@@ -533,7 +533,7 @@ function pfQuest:UpdateQuestlog()
       local stateParts = { watched and "track" or "", complete and "complete" or "incomplete" }
       if objectives then
         for i = 1, objectives, 1 do
-          local text, _, done = GetQuestLogLeaderBoard(i, qlogid)
+          local text, _, done = compat.GetQuestLogLeaderBoard(i, qlogid)
           stateParts[getn(stateParts) + 1] = i
           stateParts[getn(stateParts) + 1] = done and "done" or "todo"
         end
@@ -863,7 +863,7 @@ function pfQuest:AddQuestLogIntegration()
   pfQuest.buttonShow:SetText(pfQuest_Loc["Show"])
   pfQuest.buttonShow:SetPoint("TOP", dockTitle, "TOP", -110, 0)
   pfQuest.buttonShow:SetScript("OnClick", function()
-    local questIndex = GetQuestLogSelection()
+    local questIndex = compat.GetQuestLogSelection()
     local questids = pfDatabase:GetQuestIDs(questIndex)
     local title, _, _, header, _, complete = compat.GetQuestLogTitle(questIndex)
     local id = questids and tonumber(questids[1])
@@ -886,7 +886,7 @@ function pfQuest:AddQuestLogIntegration()
   pfQuest.buttonHide:SetText(pfQuest_Loc["Hide"])
   pfQuest.buttonHide:SetPoint("TOP", dockTitle, "TOP", -37, 0)
   pfQuest.buttonHide:SetScript("OnClick", function()
-    local questIndex = GetQuestLogSelection()
+    local questIndex = compat.GetQuestLogSelection()
     local title, _, _, header, _, complete = compat.GetQuestLogTitle(questIndex)
     if header then
       return
@@ -1213,7 +1213,7 @@ local HookAbandonQuest = AbandonQuest
 AbandonQuest = function()
   pfQuest.abandon = GetAbandonQuestName()
   pfQuest.abandonID = nil
-  local selected = GetQuestLogSelection()
+  local selected = compat.GetQuestLogSelection()
   for questID, state in pairs(pfQuest.questlog or {}) do
     if type(questID) == "number" and state and state.qlogid == selected then
       pfQuest.abandonID = questID
@@ -1257,7 +1257,7 @@ QuestLog_Update = function()
     -- button refresh read-only so resolving an ambiguous quest cannot select a
     -- hidden row and expand its collapsed category.
     local preserveSelection = QuestLogFrame and QuestLogFrame:IsShown()
-    local questids = pfDatabase:GetQuestIDs(GetQuestLogSelection(), preserveSelection)
+    local questids = pfDatabase:GetQuestIDs(compat.GetQuestLogSelection(), preserveSelection)
     if questids and questids[1] and tonumber(questids[1]) and pfQuest.questlog[questids[1]] then
       pfQuest.buttonOnline:SetID(questids[1])
       pfQuest.buttonOnline:Show()

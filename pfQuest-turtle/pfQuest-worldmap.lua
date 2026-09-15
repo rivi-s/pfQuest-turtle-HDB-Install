@@ -601,6 +601,7 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
     local currentZoneOnly = tonumber(pfQuest_config["trackingmethod"]) == 5
     local playerMapID = pfMap.GetPlayerMapID and pfMap:GetPlayerMapID() or pfMap.playerMapID
     local hideUnexplored = pfQuest_config["hideunexplored"] == "1"
+    processedQuests.projectedMarkers = processedQuests.projectedMarkers or {}
     for addon, addonData in pairs(pfMap.nodes) do
         for zID, zoneNodes in pairs(addonData) do
             stats.zonesSeen = stats.zonesSeen + 1
@@ -721,6 +722,40 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
                                     skipNode = true
                                 end
                                 local contX, contY = ZoneToContinent(zoneX, zoneY, zID, continent)
+                                if not skipNode and contX and contY then
+                                    -- Turtle can expose one physical quest NPC through both a
+                                    -- custom-zone record and its underlying standard-zone record.
+                                    -- On the continent map those coordinates overlap. Suppress
+                                    -- only matching quest markers within one icon width when one
+                                    -- side comes from a custom map; real nearby NPC spawns remain.
+                                    local projectionKeys = {}
+                                    local duplicateProjection = false
+                                    for _, data in pairs(node) do
+                                        if data.questid and data.spawnid and data.QTYPE then
+                                            local key = tostring(data.questid) .. ":" .. tostring(data.QTYPE)
+                                                .. ":" .. tostring(data.spawnid)
+                                            table.insert(projectionKeys, key)
+                                            local previous = processedQuests.projectedMarkers[key]
+                                            if previous and (previous.custom or customContinentTransforms[zID])
+                                                and math.abs(previous.x - contX) <= 0.012
+                                                and math.abs(previous.y - contY) <= 0.012 then
+                                                duplicateProjection = true
+                                                break
+                                            end
+                                        end
+                                    end
+
+                                    if duplicateProjection then
+                                        skipNode = true
+                                    else
+                                        for _, key in pairs(projectionKeys) do
+                                            processedQuests.projectedMarkers[key] = {
+                                                x = contX, y = contY,
+                                                custom = customContinentTransforms[zID] and true or false,
+                                            }
+                                        end
+                                    end
+                                end
                                 if not skipNode and contX and contY then
                                     stats.nodesConverted = stats.nodesConverted + 1
                                     if contX and contY and contX >= 0 and contX <= 1 and contY >= 0 and contY <= 1 then

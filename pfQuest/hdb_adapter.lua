@@ -3,6 +3,7 @@
 -- and the original search remains the fallback until this path is proven.
 local compat = pfQuestCompat
 local questIdentityCache = {}
+local questIdentityUnresolved = {}
 local questIdentityPending = {}
 local questIdentityFailed = {}
 
@@ -100,33 +101,79 @@ end
 local function CaptureQuestIdentityText(qlogid, preserveSelection)
   local description, objective = "", ""
   if not preserveSelection then
-    local oldID = GetQuestLogSelection()
-    SelectQuestLogEntry(qlogid)
-    description, objective = GetQuestLogQuestText()
-    SelectQuestLogEntry(oldID)
+    local oldID = compat.GetQuestLogSelection()
+    compat.SelectQuestLogEntry(qlogid)
+    description, objective = compat.GetQuestLogQuestText()
+    compat.SelectQuestLogEntry(oldID)
   end
   local targets = {}
   for index = 1, (GetNumQuestLeaderBoards(qlogid) or 0) do
-    local text, kind = GetQuestLogLeaderBoard(index, qlogid)
+    local text, kind = compat.GetQuestLogLeaderBoard(index, qlogid)
     local _, _, name = string.find(text or "", "^(.-):")
     if name and kind then targets[string.lower(kind) .. ":" .. NormalizeQuestIdentityText(name)] = true end
   end
   return description or "", objective or "", targets
 end
 
+local function FilterQuestCandidates(candidates, predicate)
+  local filtered = {}
+  for index = 1, table.getn(candidates) do
+    if predicate(candidates[index]) then table.insert(filtered, candidates[index]) end
+  end
+  return filtered
+end
+
+local function ObjectiveLabelSet(value)
+  local labels = {}
+  for label in string.gfind(value or "", "([^|]+)") do
+    local normalizedLabel = NormalizeQuestIdentityText(label)
+    if normalizedLabel ~= "" then labels[normalizedLabel] = true end
+  end
+  return labels
+end
+
+local function SameNonemptySet(first, second)
+  local count = 0
+  for key in pairs(first) do
+    count = count + 1
+    if not second[key] then return false end
+  end
+  if count == 0 then return false end
+  for key in pairs(second) do
+    if not first[key] then return false end
+  end
+  return true
+end
+
+local function PrerequisitesSatisfied(value)
+  if not value or value == "" then return true end
+  for prerequisite in string.gfind(value, "[^,]+") do
+    if pfQuest_history[tonumber(prerequisite)] then return true end
+  end
+  return false
+end
+
+local function RestrictionMatches(mask, playerBit)
+  local numericMask = tonumber(mask)
+  if not numericMask or numericMask == 0 then return true end
+  return playerBit and bit.band(numericMask, playerBit) == playerBit
+end
+
 -- Resolve only duplicate-title entries here. Unique titles retain the immediate
 -- path until the rest of quest-log identity has moved off the Lua database.
--- A nil result with pending=true tells the caller to keep its title placeholder.
+-- A nil result with handled=true tells the caller not to run the legacy
+-- score-based resolver. Once HDB identifies a duplicate title, failures and
+-- ties must remain unresolved rather than selecting an arbitrary candidate.
 function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection)
   if not Enabled() or type(pfQuestHearthDB.GetQuestDisambiguationAsync) ~= "function"
     or type(pfQuestHearthDB.GetCachedQuestIDsByTitle) ~= "function" then
-    return nil, false
+    return nil, false, false
   end
   local slotKey = tostring(qlogid) .. ":" .. tostring(title) .. ":" .. tostring(level or "")
-  if questIdentityFailed[slotKey] then return nil, false end
-  if questIdentityPending[slotKey] then return nil, true end
+  if questIdentityFailed[slotKey] then return nil, false, true end
+  if questIdentityPending[slotKey] then return nil, true, true end
   local candidates, titleIndexReady = pfQuestHearthDB:GetCachedQuestIDsByTitle(title)
-  if candidates and table.getn(candidates) == 1 then return candidates[1], false end
+  if candidates and table.getn(candidates) == 1 then return candidates[1], false, true end
   if not candidates and not titleIndexReady then
     questIdentityPending[slotKey] = true
     local accepted = pfQuestHearthDB:GetQuestIDsByTitleAsync(title, function(ids, err)
@@ -134,11 +181,11 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
       if err or not ids then questIdentityFailed[slotKey] = true end
       pfQuest.updateQuestLog = true
     end)
-    if accepted then return nil, true end
+    if accepted then return nil, true, true end
     questIdentityPending[slotKey] = nil
-    return nil, false
+    return nil, false, true
   end
-  if not candidates or table.getn(candidates) < 2 then return nil, false end
+  if not candidates or table.getn(candidates) < 2 then return nil, false, false end
 
   local description, objective, liveTargets = CaptureQuestIdentityText(qlogid, preserveSelection)
   local targetKeys = {}
@@ -146,7 +193,8 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
   table.sort(targetKeys)
   local observationKey = slotKey .. ":" .. NormalizeQuestIdentityText(objective)
     .. ":" .. NormalizeQuestIdentityText(description) .. ":" .. table.concat(targetKeys, "|")
-  if questIdentityCache[observationKey] then return questIdentityCache[observationKey], false end
+  if questIdentityCache[observationKey] then return questIdentityCache[observationKey], false, true end
+  if questIdentityUnresolved[observationKey] then return nil, false, true end
   questIdentityPending[slotKey] = true
   local accepted = pfQuestHearthDB:GetQuestDisambiguationAsync(title, function(records, err)
     questIdentityPending[slotKey] = nil
@@ -155,43 +203,82 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
       pfQuest.updateQuestLog = true
       return
     end
-    local best, bestID, tied = 0, nil, false
-    for index = 1, table.getn(records) do
-      local record = records[index]
-      local score = 0
-      local objectiveMatch = objective ~= "" and record.objective
-        and NormalizeQuestIdentityText(pfDatabase:FormatQuestText(record.objective)) == NormalizeQuestIdentityText(objective)
-      local descriptionMatch = description ~= "" and record.description
-        and NormalizeQuestIdentityText(pfDatabase:FormatQuestText(record.description)) == NormalizeQuestIdentityText(description)
-      local targetMatch = false
-      for label in string.gfind(record.objectiveLabels or "", "([^|]+)") do
-        if liveTargets[NormalizeQuestIdentityText(label)] then targetMatch = true break end
-      end
-      local prerequisiteMatch = false
-      for prerequisite in string.gfind(record.prerequisites or "", "[^,]+") do
-        if pfQuest_history[tonumber(prerequisite)] then prerequisiteMatch = true break end
-      end
-      if objectiveMatch then score = score + 4 end
-      if descriptionMatch then score = score + 3 end
-      if targetMatch then score = score + 5 end
-      if prerequisiteMatch then score = score + 6 end
-      if tonumber(record.level) and tonumber(level) and tonumber(record.level) == tonumber(level) then score = score + 1 end
-      if score > best then
-        best, bestID, tied = score, record.id, false
-      elseif score > 0 and score == best then
-        tied = true
-      end
-    end
-    if best > 1 and bestID and not tied then
-      questIdentityCache[observationKey] = bestID
+    local resolutionClass = records[1] and records[1].resolutionClass
+    if resolutionClass == "PARTIAL" or resolutionClass == "UNRESOLVABLE" then
+      questIdentityUnresolved[observationKey] = true
       pfQuest.updateQuestLog = true
+      return
     end
+
+    local remaining = records
+    local liveObjective = NormalizeQuestIdentityText(objective)
+    local liveDescription = NormalizeQuestIdentityText(description)
+
+    -- Exact nonempty quest text is the first discriminator. A candidate with
+    -- absent text cannot match an absent client value by accident.
+    if liveObjective ~= "" or liveDescription ~= "" then
+      remaining = FilterQuestCandidates(remaining, function(record)
+        local objectiveMatches = liveObjective == "" or (
+          record.objective and NormalizeQuestIdentityText(
+            pfDatabase:FormatQuestText(record.objective)
+          ) == liveObjective
+        )
+        local descriptionMatches = liveDescription == "" or (
+          record.description and NormalizeQuestIdentityText(
+            pfDatabase:FormatQuestText(record.description)
+          ) == liveDescription
+        )
+        return objectiveMatches and descriptionMatches
+      end)
+    end
+
+    -- TEXT_UNIQUE groups are safe only when exact text leaves one candidate.
+    if table.getn(remaining) ~= 1 and resolutionClass ~= "TEXT_UNIQUE" then
+      if next(liveTargets) then
+        remaining = FilterQuestCandidates(remaining, function(record)
+          return SameNonemptySet(liveTargets, ObjectiveLabelSet(record.objectiveLabels))
+        end)
+      end
+
+      if table.getn(remaining) > 1 then
+        local eligible = FilterQuestCandidates(remaining, function(record)
+          return PrerequisitesSatisfied(record.prerequisites)
+        end)
+        if table.getn(eligible) > 0 then remaining = eligible end
+      end
+    end
+
+    -- STRUCTURAL_UNIQUE groups must be unique before conditional character
+    -- restrictions are considered.
+    if table.getn(remaining) ~= 1 and resolutionClass == "CONDITIONAL" then
+      local _, race = UnitRace("player")
+      local _, class = UnitClass("player")
+      local raceBit = race and pfDatabase:GetBitByRace(race)
+      local classBit = class and pfDatabase:GetBitByClass(class)
+      remaining = FilterQuestCandidates(remaining, function(record)
+        return RestrictionMatches(record.raceMask, raceBit)
+          and RestrictionMatches(record.classMask, classBit)
+      end)
+
+      if table.getn(remaining) > 1 and tonumber(level) then
+        remaining = FilterQuestCandidates(remaining, function(record)
+          return tonumber(record.level) and tonumber(record.level) == tonumber(level)
+        end)
+      end
+    end
+
+    if table.getn(remaining) == 1 and remaining[1].id then
+      questIdentityCache[observationKey] = remaining[1].id
+    else
+      questIdentityUnresolved[observationKey] = true
+    end
+    pfQuest.updateQuestLog = true
   end)
   if not accepted then
     questIdentityPending[slotKey] = nil
-    return nil, false
+    return nil, false, true
   end
-  return nil, true
+  return nil, true, true
 end
 
 function pfDatabase:ShowExtendedTooltipHDB(id, tooltip, parent, anchor, offx, offy, postRender)
@@ -657,6 +744,13 @@ function pfDatabase:FilterHDBAvailableStartPins(pins)
         + (pfQuest_config["showhighlevel"] == "1" and 3 or 0) then
         eligible = false
       end
+    end
+    -- The map's optional difficulty range only limits the upper end of the
+    -- displayed range. The established low-level checkbox remains
+    -- authoritative, matching QuestFilter() for the non-HDB path.
+    if eligible and tonumber(pin.qlvl) and tonumber(pin.qlvl) < plevel - 4
+      and pfQuest_config["showlowlevel"] == "0" then
+      eligible = false
     end
     if eligible and pin.prerequisites and pin.prerequisites ~= "" then
       local prereqComplete = false

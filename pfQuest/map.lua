@@ -268,10 +268,11 @@ pfMap.tooltip = CreateFrame("Frame", "pfMapTooltip", GameTooltip)
 local function IsCurrentGameTooltipQuest(meta)
   local questid = meta and tonumber(meta.questid)
   if not questid or not meta.quest then return true end
-  if pfQuest.questlog and pfQuest.questlog[questid] then return true end
+  local questlog = (pfQuest and pfQuest.questlog) or {}
+  if questlog[questid] or questlog[tostring(questid)] then return true end
 
-  for activeID, state in pairs((pfQuest and pfQuest.questlog) or {}) do
-    if type(activeID) == "number" and state and state.title == meta.quest then
+  for activeID, state in pairs(questlog) do
+    if tonumber(activeID) and state and state.title == meta.quest then
       return false
     end
   end
@@ -360,6 +361,18 @@ function pfMap:HexDifficultyColor(level, force)
   end
 end
 
+local function ObjectiveNameMatches(spawn, objective)
+  spawn = string.lower(tostring(spawn or ""))
+  objective = string.lower(tostring(objective or ""))
+  if spawn == "" or objective == "" then return false end
+  if spawn == objective then return true end
+
+  -- Some quest-log rows pluralize a creature name even though the unit
+  -- database and tooltip use its singular form (Harvest Watcher/Watchers).
+  return objective == spawn .. "s" or spawn == objective .. "s"
+    or objective == spawn .. "es" or spawn == objective .. "es"
+end
+
 function pfMap:ShowTooltip(meta, tooltip)
   local catch = nil
   local catch_obj = nil
@@ -387,18 +400,28 @@ function pfMap:ShowTooltip(meta, tooltip)
 
         if objectives then
           for i = 1, objectives, 1 do
-            local text, type, finished = GetQuestLogLeaderBoard(i, qid)
+            local text, type, finished = compat.GetQuestLogLeaderBoard(i, qid)
 
             if type == "monster" then
               -- kill
               local i, j, monsterName, objNum, objNeeded =
                 strfind(text, pfUI.api.SanitizePattern(QUEST_MONSTERS_KILLED))
-              if monsterName and meta["spawn"] == monsterName then
+              if monsterName and ObjectiveNameMatches(meta["spawn"], monsterName) then
                 catch_obj = true
                 local r, g, b = pfMap.tooltip:GetColor(objNum, objNeeded)
                 tooltip:AddLine("|cffaaaaaa- |r" .. monsterName .. ": " .. objNum .. "/" .. objNeeded, r, g, b)
               end
-            elseif table.getn(meta["item"]) > 0 and type == "item" and meta["droprate"] then
+            elseif meta["QTYPE"] == "OBJECT_OBJECTIVE" and (type == "object" or type == "item") then
+              -- Direct object objectives use the same localized progress
+              -- format as item objectives, but have no drop-rate item entry.
+              local _, _, objectName, objNum, objNeeded =
+                strfind(text, pfUI.api.SanitizePattern(QUEST_OBJECTS_FOUND))
+              if objectName and meta["spawn"] == objectName then
+                catch_obj = true
+                local r, g, b = pfMap.tooltip:GetColor(objNum, objNeeded)
+                tooltip:AddLine("|cffaaaaaa- |r" .. objectName .. ": " .. objNum .. "/" .. objNeeded, r, g, b)
+              end
+            elseif table.getn(meta["item"]) > 0 and (type == "item" or type == "object") and meta["droprate"] then
               -- loot
               local i, j, itemName, objNum, objNeeded = strfind(text, pfUI.api.SanitizePattern(QUEST_OBJECTS_FOUND))
 
@@ -2100,8 +2123,8 @@ if compat.client >= 30300 then
     WorldMapFrame_ClearQuestPOIs()
     if not IsShiftKeyDown() then
       pfMap.highlight = nil
-      local questLogIndex = GetQuestLogSelection()
-      local title = GetQuestLogTitle(questLogIndex)
+      local questLogIndex = compat.GetQuestLogSelection()
+      local title = compat.GetQuestLogTitle(questLogIndex)
 
       if title then
         if previousTitle == title then

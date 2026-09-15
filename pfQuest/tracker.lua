@@ -65,7 +65,7 @@ local function ShowTooltip()
         local objectives = GetNumQuestLeaderBoards(qlogid)
         if objectives and objectives > 0 then
           for i = 1, objectives, 1 do
-            local text, _, done = GetQuestLogLeaderBoard(i, qlogid)
+            local text, _, done = compat.GetQuestLogLeaderBoard(i, qlogid)
             local _, _, obj, cur, req = strfind(gsub(text, "\239\188\154", ":"), "(.*):%s*([%d]+)%s*/%s*([%d]+)")
             if done then
               GameTooltip:AddLine(" - " .. text, 0, 1, 0)
@@ -483,7 +483,7 @@ function tracker.ButtonClick()
       if data.title == this.title then
         -- show questlog
         HideUIPanel(QuestLogFrame)
-        SelectQuestLogEntry(data.qlogid)
+        compat.SelectQuestLogEntry(data.qlogid)
         ShowUIPanel(QuestLogFrame)
         break
       end
@@ -629,7 +629,7 @@ function tracker.ButtonEvent(self)
     if objectives and objectives > 0 then
       -- populate cache and compute progress in one pass
       for i = 1, objectives, 1 do
-        local text, type, done = GetQuestLogLeaderBoard(i, qlogid)
+        local text, type, done = compat.GetQuestLogLeaderBoard(i, qlogid)
         board_cache[i] = { text, type, done }
         local _, _, obj, objNum, objNeeded = strfind(gsub(text, "\239\188\154", ":"), "(.*):%s*([%d]+)%s*/%s*([%d]+)")
         if objNum and objNeeded then
