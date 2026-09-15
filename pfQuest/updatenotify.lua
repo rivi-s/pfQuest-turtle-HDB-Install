@@ -1,41 +1,52 @@
-local function strsplit(delimiter, subject)
-  if not subject then
-    return nil
+local function ParseVersion(label)
+  label = tostring(label or "")
+  local _, _, major, minor, patch, alpha = string.find(
+    label, "^(%d+)%.(%d+)%.(%d+)%-alpha%.(%d+)$"
+  )
+  if major then
+    return tonumber(major) * 100000000
+      + tonumber(minor) * 1000000
+      + tonumber(patch) * 10000
+      + tonumber(alpha)
   end
-  local delimiter, fields = delimiter or ":", {}
-  local pattern = string.format("([^%s]+)", delimiter)
-  string.gsub(subject, pattern, function(c)
-    fields[table.getn(fields) + 1] = c
-  end)
-  return unpack(fields)
+
+  _, _, major, minor, patch = string.find(label, "^(%d+)%.(%d+)%.(%d+)$")
+  if major then
+    return tonumber(major) * 100000000
+      + tonumber(minor) * 1000000
+      + tonumber(patch) * 10000
+      + 9999
+  end
 end
 
-local channels = { "BATTLEGROUND", "RAID", "GUILD" }
-local version, remote, major, minor, fix, displayed, available
+local function SafeSendAddonMessage(prefix, text, channel)
+  pcall(SendAddonMessage, prefix, text, channel)
+end
+
+local channels = { "BATTLEGROUND", "RAID", "GUILD", "PARTY" }
+local prefix = "pfQuestHDB"
+local releaseURL = "https://github.com/rivi-s/pfQuest-HDB/releases"
+local localLabel, localVersion, displayed
 local versioncheck = CreateFrame("Frame")
+
 versioncheck:RegisterEvent("ADDON_LOADED")
 versioncheck:RegisterEvent("CHAT_MSG_ADDON")
 versioncheck:RegisterEvent("PARTY_MEMBERS_CHANGED")
 versioncheck:RegisterEvent("PLAYER_ENTERING_WORLD")
 versioncheck:SetScript("OnEvent", function()
   if event == "ADDON_LOADED" then
-    if arg1 == "pfQuest" or arg1 == "pfQuest-tbc" or arg1 == "pfQuest-wotlk" then
-      major, minor, fix = strsplit(".", tostring(GetAddOnMetadata(arg1, "Version")))
-      major = tonumber(major) or 0
-      minor = tonumber(minor) or 0
-      fix = tonumber(fix) or 0
-
-      version = major * 10000 + minor * 100 + fix
+    if arg1 == "pfQuest" then
+      localLabel = tostring(GetAddOnMetadata(arg1, "Version") or "")
+      localVersion = ParseVersion(localLabel)
     end
-
     return
-  elseif event == "CHAT_MSG_ADDON" and arg1 == "pfQuest" then
-    local v, remoteversion = strsplit(":", arg2)
-    local remoteversion = tonumber(remoteversion)
-    if v == "VERSION" and remoteversion then
-      remote = remote and max(remote, remoteversion) or remoteversion
-      if remote > version then
-        pfQuest_config.latest = remote
+  elseif event == "CHAT_MSG_ADDON" and arg1 == prefix then
+    local _, _, remoteLabel = string.find(tostring(arg2 or ""), "^VERSION:(.+)$")
+    local remoteVersion = ParseVersion(remoteLabel)
+    if remoteVersion and localVersion and remoteVersion > localVersion then
+      local savedVersion = ParseVersion(pfQuest_config.latestHDB)
+      if not savedVersion or remoteVersion > savedVersion then
+        pfQuest_config.latestHDB = remoteLabel
       end
     end
     return
@@ -43,26 +54,22 @@ versioncheck:SetScript("OnEvent", function()
     return
   end
 
-  -- abort here without local version
-  if not version then
-    return
+  if not localVersion then return end
+
+  for _, channel in pairs(channels) do
+    SafeSendAddonMessage(prefix, "VERSION:" .. localLabel, channel)
   end
 
-  -- send updates
-  for _, chan in pairs(channels) do
-    SendAddonMessage("pfQuest", "VERSION:" .. version, chan)
-  end
+  if event == "PARTY_MEMBERS_CHANGED" then return end
 
-  -- abort here on group member events
-  if event == "PARTY_MEMBERS_CHANGED" then
-    return
-  end
-
-  -- display available update
-  if version and version > 0 and pfQuest_config.latest and pfQuest_config.latest > version and not displayed then
+  local availableLabel = pfQuest_config.latestHDB
+  local availableVersion = ParseVersion(availableLabel)
+  if availableVersion and availableVersion > localVersion and not displayed then
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpf|cffffffffQuest |cff00aeff[HDB]|r update available")
     DEFAULT_CHAT_FRAME:AddMessage(
-      pfQuest_Loc["|cff33ffccpf|rQuest: New version available! Have a look at http://shagu.org !"]
+      "Current: |cff66ccff" .. localLabel .. "|r -> Available: |cff66ccff" .. availableLabel .. "|r"
     )
+    DEFAULT_CHAT_FRAME:AddMessage("Download: |cff66ccff" .. releaseURL .. "|r")
     displayed = true
   end
 end)

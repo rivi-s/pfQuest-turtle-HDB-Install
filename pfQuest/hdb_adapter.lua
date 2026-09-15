@@ -663,6 +663,18 @@ function pfDatabase:ClearQuestHDBCache(id)
   GetActiveQuestCache()[id] = nil
 end
 
+-- Quest Log row numbers are positional and can all shift when one quest is
+-- accepted. Preserve the cached database result and only retarget its live
+-- objective reads to the quest's new row.
+function pfDatabase:ReindexQuestHDBCache(id, qlogid)
+  id, qlogid = tonumber(id), tonumber(qlogid)
+  local record = id and GetActiveQuestCache()[id]
+  if not record or not qlogid or not IsCurrentQuest(id, qlogid) then return false end
+  record.qlogid = qlogid
+  pfDatabase:RefreshQuestHDBState(id, qlogid)
+  return true
+end
+
 function pfDatabase:GetQuestTitleHDB(id)
   local record = GetActiveQuestCache()[tonumber(id)]
   return record and record.title or nil
@@ -720,14 +732,15 @@ function pfDatabase:FilterHDBAvailableStartPins(pins)
   end
   local levelRange = pfQuest_config["questpinlevelrange"] or "off"
   if levelRange == "all" then levelRange = "off" end
-  local maximum = ({ orange = 4, yellow = 3, green = 2, gray = 1 })[levelRange]
+  local threshold = ({ red = 5, orange = 4, yellow = 3, green = 2, gray = 1 })[levelRange]
+  local direction = pfQuest_config["questpinleveldirection"] == "higher" and "higher" or "lower"
   local plevel = UnitLevel("player")
   for index = 1, table.getn(pins or {}) do
     local pin = pins[index]
     local eligible = pin.questID and not (pfQuest.questlog and pfQuest.questlog[pin.questID])
       and not activeTitles[pin.quest]
       and not pfQuest_history[pin.questID]
-    if eligible and maximum then
+    if eligible and threshold then
       local color = pfQuestCompat.GetDifficultyColor(tonumber(pin.qlvl) or 0)
       local rank
       if color.r > .9 and color.g < .15 then rank = 5
@@ -735,7 +748,11 @@ function pfDatabase:FilterHDBAvailableStartPins(pins)
       elseif color.r > .9 then rank = 3
       elseif color.g > color.r then rank = 2
       else rank = 1 end
-      eligible = rank <= maximum
+      if direction == "higher" then
+        eligible = rank >= threshold
+      else
+        eligible = rank <= threshold
+      end
     elseif eligible then
       -- No selected Level Range follows normal pfQuest available-quest rules.
       eligible = not (tonumber(pin.qlvl) and tonumber(pin.qlvl) < plevel - 4

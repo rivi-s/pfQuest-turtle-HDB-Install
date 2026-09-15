@@ -6,33 +6,41 @@ local function hcstrsplit(delimiter, subject)
   return unpack(fields)
 end
 
-local function formatVersion(versionNum)
-  local major = math.floor(versionNum / 10000)
-  local minor = math.floor((math.mod(versionNum, 10000)) / 100)
-  local fix = math.mod(versionNum, 100)
-  return major .. "." .. minor .. "." .. fix
+local function ParseVersion(label)
+  label = tostring(label or "")
+  local _, _, major, minor, patch, alpha = string.find(
+    label, "^(%d+)%.(%d+)%.(%d+)%-alpha%.(%d+)$"
+  )
+  if major then
+    return tonumber(major) * 100000000
+      + tonumber(minor) * 1000000
+      + tonumber(patch) * 10000
+      + tonumber(alpha)
+  end
+
+  _, _, major, minor, patch = string.find(label, "^(%d+)%.(%d+)%.(%d+)$")
+  if major then
+    return tonumber(major) * 100000000
+      + tonumber(minor) * 1000000
+      + tonumber(patch) * 10000
+      + 9999
+  end
 end
 
-local major, minor, fix = hcstrsplit(".", tostring(GetAddOnMetadata("pfQuest-turtle", "Version")))
-major = tonumber(major) or 0
-minor = tonumber(minor) or 0
-fix = tonumber(fix) or 0
+local localLabel = tostring(GetAddOnMetadata("pfQuest-turtle", "Version") or "")
 local alreadyshown = false
-local localversion = major*10000 + minor*100 + fix
-local remoteversion = tonumber(pfqtupdateavailable) or 0
+local localversion = ParseVersion(localLabel) or 0
+local remoteLabel = type(pfqtupdateavailable) == "string" and pfqtupdateavailable or nil
+local remoteversion = ParseVersion(remoteLabel) or 0
 local loginchannels = { "RAID", "GUILD", "PARTY" }
 local groupchannels = { "RAID", "PARTY" }
-local requiredBaseVersion = "8.0.21"
-local baseReleaseURL = "https://github.com/rivi-s/pfQuest/releases"
-local turtleReleaseURL = "https://github.com/rivi-s/pfQuest-turtle/releases"
+local addonPrefix = "pfqtHDB"
+local turtleReleaseURL = "https://github.com/rivi-s/pfQuest-turtle-HDB/releases"
 
-local function ShowUpdateNotice(remotever)
-    local currentVer = formatVersion(localversion)
-    local availableVer = formatVersion(remotever)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpf|cffffffffQuest |cffcccccc[TurtleWoW DB]|r New version available!")
-    DEFAULT_CHAT_FRAME:AddMessage("Current: |cff66ccff" .. currentVer .. "|r -> Available: |cff66ccff" .. availableVer .. "|r")
-    DEFAULT_CHAT_FRAME:AddMessage("Update |cff33ffccpfQuest|r base (" .. requiredBaseVersion .. "+): |cff66ccff" .. baseReleaseURL .. "|r")
-    DEFAULT_CHAT_FRAME:AddMessage("Update |cff33ffccpfQuest-turtle|r: |cff66ccff" .. turtleReleaseURL .. "|r")
+local function ShowUpdateNotice(availableLabel)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpf|cffffffffQuest-turtle |cff00aeff[HDB]|r update available")
+    DEFAULT_CHAT_FRAME:AddMessage("Current: |cff66ccff" .. localLabel .. "|r -> Available: |cff66ccff" .. availableLabel .. "|r")
+    DEFAULT_CHAT_FRAME:AddMessage("Download the complete matching package: |cff66ccff" .. turtleReleaseURL .. "|r")
 end
 
 local function SafeSendAddonMessage(prefix, text, chatType, target)
@@ -88,7 +96,7 @@ local function UpdatePartyVersionDisplay()
                     label:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 15)
                 end
 
-                label:SetText("v" .. formatVersion(version))
+                label:SetText("v" .. version)
                 label:SetTextColor(0.4, 1, 1)
                 label:Show()
             end
@@ -128,7 +136,7 @@ local function UpdateTargetVersionDisplay()
                 label:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 15)
             end
 
-            label:SetText("v" .. formatVersion(version))
+            label:SetText("v" .. version)
             label:SetTextColor(0.4, 1, 1)
             label:Show()
         end
@@ -147,14 +155,16 @@ pfqtupdater:RegisterEvent("PARTY_MEMBERS_CHANGED")
 pfqtupdater:RegisterEvent("PLAYER_TARGET_CHANGED")
 pfqtupdater:SetScript("OnEvent", function()
     if event == "CHAT_MSG_ADDON" then
-        if arg1 == "pfqt" then
+        if arg1 == addonPrefix then
             local v, remotever = hcstrsplit(":", arg2)
-            remotever = tonumber(remotever)
-            if v == "VERSION" and remotever then
+            local remoteCode = ParseVersion(remotever)
+            if v == "VERSION" and remoteCode then
                 local strippedName = StripRealmName(arg4)
                 partyVersions[strippedName] = remotever
-                if remotever > localversion then
+                if remoteCode > localversion then
                     pfqtupdateavailable = remotever
+                    remoteLabel = remotever
+                    remoteversion = remoteCode
                     if not alreadyshown then
                         ShowUpdateNotice(remotever)
                         alreadyshown = true
@@ -163,26 +173,21 @@ pfqtupdater:SetScript("OnEvent", function()
             end
             if v == "PING?" then
                 if arg3 == "WHISPER" then
-                    SafeSendAddonMessage("pfqt", "PONG!:"..GetAddOnMetadata("pfQuest-turtle", "Version"), "WHISPER", arg4)
+                    SafeSendAddonMessage(addonPrefix, "PONG!:"..localLabel, "WHISPER", arg4)
                 else
                     for _, chan in ipairs(loginchannels) do
-                        SafeSendAddonMessage("pfqt", "PONG!:"..GetAddOnMetadata("pfQuest-turtle", "Version"), chan)
+                        SafeSendAddonMessage(addonPrefix, "PONG!:"..localLabel, chan)
                     end
                 end
             end
             if v == "PONG!" then
                 if UnitName("player") == ADMIN_NAME then
                     local pongCmd, pongversion = hcstrsplit(":", arg2)
-                    local pmajor, pminor, pfix = hcstrsplit(".", tostring(pongversion))
-                    pmajor = tonumber(pmajor) or 0
-                    pminor = tonumber(pminor) or 0
-                    pfix = tonumber(pfix) or 0
-                    pongversion = pmajor*10000 + pminor*100 + pfix
                     local strippedName = StripRealmName(arg4)
                     partyVersions[strippedName] = pongversion
 
                     if manualPings[strippedName] then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffff8000"..arg4.."|r - |cff66ccffv"..formatVersion(pongversion).."|r")
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffff8000"..arg4.."|r - |cff66ccffv"..pongversion.."|r")
                         manualPings[strippedName] = nil
                     end
 
@@ -195,25 +200,24 @@ pfqtupdater:SetScript("OnEvent", function()
         local groupsize = GetNumPartyMembers() > 0 and GetNumPartyMembers() or 0
         if (pfqtupdater.group or 0) < groupsize then
             for _, chan in ipairs(groupchannels) do
-                SafeSendAddonMessage("pfqt", "VERSION:" .. localversion, chan)
+                SafeSendAddonMessage(addonPrefix, "VERSION:" .. localLabel, chan)
             end
         end
         pfqtupdater.group = groupsize
         UpdatePartyVersionDisplay()
     elseif event == "PLAYER_ENTERING_WORLD" then
         if not alreadyshown and localversion < remoteversion then
-            ShowUpdateNotice(remoteversion)
-            pfqtupdateavailable = localversion
+            ShowUpdateNotice(remoteLabel)
             alreadyshown = true
         end
         for _, chan in ipairs(loginchannels) do
-            SafeSendAddonMessage("pfqt", "VERSION:" .. localversion, chan)
+            SafeSendAddonMessage(addonPrefix, "VERSION:" .. localLabel, chan)
         end
     elseif event == "PLAYER_TARGET_CHANGED" then
         if UnitName("player") == ADMIN_NAME then
             local targetName = UnitName("target")
             if targetName and UnitIsPlayer("target") then
-                SafeSendAddonMessage("pfqt", "PING?", "WHISPER", targetName)
+                SafeSendAddonMessage(addonPrefix, "PING?", "WHISPER", targetName)
             end
         end
         UpdateTargetVersionDisplay()
@@ -228,5 +232,5 @@ SlashCmdList["PFQTPING"] = function(msg)
     end
     local strippedName = StripRealmName(msg)
     manualPings[strippedName] = true
-    SafeSendAddonMessage("pfqt", "PING?", "WHISPER", msg)
+    SafeSendAddonMessage(addonPrefix, "PING?", "WHISPER", msg)
 end
