@@ -891,6 +891,7 @@ function pfQuestHearthDB:GetQuestStartPinsAsync(options, callback)
   local includeAllLevels = options.includeAllLevels and 1 or 0
   local includeEvents = options.includeEvents and 1 or 0
   local questID = math.floor(tonumber(options.questID) or 0)
+  local prerequisiteID = math.floor(tonumber(options.prerequisiteID) or 0)
   local sql = [[WITH resolved_start AS (
       SELECT q.quest_id, q.target_kind, q.target_id, q.target_kind AS origin_kind,
         q.target_id AS origin_id, NULL AS chance
@@ -922,6 +923,11 @@ function pfQuestHearthDB:GetQuestStartPinsAsync(options, callback)
       AND it.locale = ']] .. CurrentLocale() .. [['
     WHERE 1 = 1
       AND (]] .. questID .. [[ = 0 OR q.quest_id = ]] .. questID .. [[)
+      AND (]] .. prerequisiteID .. [[ = 0 OR EXISTS (
+        SELECT 1 FROM quest_prerequisite direct_pre
+        WHERE direct_pre.quest_id = q.quest_id
+          AND direct_pre.prerequisite_id = ]] .. prerequisiteID .. [[
+      ))
       AND (qm.race_mask = '' OR (CAST(qm.race_mask AS INTEGER) & ]] .. raceMask .. [[) = ]] .. raceMask .. [[)
       AND (qm.class_mask = '' OR (CAST(qm.class_mask AS INTEGER) & ]] .. classMask .. [[) = ]] .. classMask .. [[)
       AND (]] .. includeEvents .. [[ = 1 OR qm.event = '')

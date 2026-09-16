@@ -1114,6 +1114,18 @@ function pfMap:BuildNode(name, parent)
 end
 
 pfMap.highlightdb = {}
+
+local function UpdateMinimapIconFade(frame, distance)
+  if not frame.pic:IsShown() then return end
+
+  local halfsize = pfMap.drawlayer:GetWidth() / 2
+  local fade_range = frame.fade_range or 8
+  local fade_in = halfsize / 100 * (fade_range - 4)
+  local fade_out = halfsize / 100 * (fade_range + 4)
+  local alpha = ((distance or fade_out) - fade_in) / (fade_out - fade_in)
+  frame.pic:SetAlpha(math.max(0, math.min(alpha, 1)))
+end
+
 function pfMap:UpdateNode(frame, node, color, obj, distance)
   -- clear node to title association table
   if pfMap.highlightdb[frame] then
@@ -1197,14 +1209,7 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
       frame.pic:Show()
 
       if obj == "minimap" then
-        local halfsize = pfMap.drawlayer:GetWidth() / 2
-        local fade_range = frame.fade_range or 8
-        local fade_in = halfsize / 100 * (fade_range - 4)
-        local fade_out = halfsize / 100 * (fade_range + 4)
-        local alpha = ((distance or fade_out) - fade_in) / (fade_out - fade_in)
-        alpha = math.max(alpha, 0)
-        alpha = math.min(alpha, 1)
-        frame.pic:SetAlpha(alpha)
+        UpdateMinimapIconFade(frame, distance)
       end
     else
       frame.pic:Hide()
@@ -1493,11 +1498,20 @@ function pfMap:UpdateNodes()
   -- player actually opens it.
   if not WorldMapFrame:IsShown() then
     local questNodes = pfMap.nodes.PFQUEST and pfMap.nodes.PFQUEST[map]
+    -- A login or asynchronous HDB load can establish lastRouteMap before the
+    -- quest nodes arrive. Rebuild when nodes exist but the route is still
+    -- empty, even if no later dirty-map flag survived the loading sequence.
+    local routeEmpty = not pfQuest.route.coords or table.getn(pfQuest.route.coords) == 0
     local rebuildRoute = pfMap.lastRouteMap ~= map or pfMap.dirtyMaps[map]
+      or (routeEmpty and questNodes and next(questNodes))
     if rebuildRoute then
       pfQuest.route:Reset()
       pfMap.lastRouteMap = map
     end
+    local playerX, playerY = GetPlayerMapPosition("player")
+    playerX, playerY = (playerX or 0) * 100, (playerY or 0) * 100
+    local nearestRawRoute
+    local nearestRawDistance
     for coords, node in pairs(questNodes or {}) do
       local x, y
       if coord_cache[coords] then
@@ -1527,8 +1541,15 @@ function pfMap:UpdateNodes()
       end
 
       if rebuildRoute and routeNode then
+        -- The hidden World Map path deliberately skips cluster-frame work.
+        -- Item-loot and kill objectives therefore remain ordinary spawn nodes
+        -- (layer 1) even when objective routing is enabled. Treat those raw
+        -- objective nodes as the route source until the visible map builds
+        -- its clusters.
+        local rawObjective = routeNode.layer == 1 and not routeNode.texture
+          and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
         local routeEligible =
-          (pfQuest_config["routecluster"] == "1" and routeNode.layer >= 9)
+          (pfQuest_config["routecluster"] == "1" and (routeNode.layer >= 9 or rawObjective))
           or (pfQuest_config["routeender"] == "1" and routeNode.layer == 4)
           or (pfQuest_config["routestarter"] == "1" and routeNode.layer == 1 and routeNode.texture)
           or (pfQuest_config["routestarter"] == "1" and routeNode.layer == 2)
@@ -1540,13 +1561,27 @@ function pfMap:UpdateNodes()
         hidden = hidden or (pfQuest_config["showcluster"] == "0" and routeNode.cluster)
         hidden = hidden or (pfQuest_config["showspawn"] == "0" and not routeNode.texture)
         if routeEligible and not hidden then
-          pfQuest.route:AddPoint({ x, y, routeNode })
+          if rawObjective then
+            -- Closed-map rendering has no cluster frames. Keep only the
+            -- nearest raw objective as an arrow target; routing through every
+            -- loot source produces a huge, meaningless zone-wide path.
+            local dx, dy = (x - playerX) * 1.5, y - playerY
+            local distance = dx * dx + dy * dy
+            if not nearestRawDistance or distance < nearestRawDistance then
+              nearestRawDistance = distance
+              nearestRawRoute = { x, y, routeNode }
+            end
+          else
+            pfQuest.route:AddPoint({ x, y, routeNode })
+          end
         end
       end
     end
+    if rebuildRoute and nearestRawRoute then pfQuest.route:AddPoint(nearestRawRoute) end
     if pfQuest.tracker and pfQuest.tracker.DoLayout then
       pfQuest.tracker.DoLayout()
     end
+    if rebuildRoute then pfMap.dirtyMaps[map] = nil end
     return
   end
 
@@ -1907,6 +1942,11 @@ function pfMap:UpdateMinimap()
             pfMap.dirtyMinimapNodes[node] = nil
           end
 
+          -- Custom tracking icons fade with player distance even when the
+          -- underlying node data is unchanged and its expensive rebuild is
+          -- skipped.
+          UpdateMinimapIconFade(pin, distance)
+
           if pin.hl:IsShown() then
             pin.hl:Hide()
           end
@@ -2038,6 +2078,14 @@ pfMap:SetScript("OnEvent", function()
       -- the normal settle period. Even enhanced clients emit a burst while
       -- the map view changes. Ordinary
       -- filter and quest-data updates retain the full debounce below.
+      -- A route created while the map was hidden has valid coordinates but
+      -- its last-draw cache refers to the hidden canvas. Invalidate only the
+      -- drawing cache so the existing target is painted on the visible map.
+      if pfQuest.route then
+        pfQuest.route.lastDrawX = nil
+        pfQuest.route.lastDrawY = nil
+        pfQuest.route.lastDrawNode = nil
+      end
       pfMap.queue_update = GetTime()
     elseif newzone ~= pfMap.lastUpdateZone then
       -- deliberate zone change: update immediately, no debounce

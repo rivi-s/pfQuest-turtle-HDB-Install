@@ -429,9 +429,11 @@ pfQuest:SetScript("OnUpdate", function()
       if abandoned and type(pfDatabase.RestoreAbandonedQuestGiverHDB) == "function"
         and pfDatabase:RestoreAbandonedQuestGiverHDB(entry[2], { addon = "PFQUEST" }) then
         -- The single cached quest was restored without scanning every giver.
+      elseif not abandoned and type(pfDatabase.RefreshCompletedQuestGiversHDB) == "function"
+        and pfDatabase:RefreshCompletedQuestGiversHDB(entry[2], { addon = "PFQUEST" }) then
+        -- Only direct follow-ups can become newly eligible after this turn-in.
       else
-        -- Turn-ins can unlock multiple follow-up quests and still require the
-        -- complete eligibility refresh.
+        -- Keep the complete eligibility refresh as the compatibility fallback.
         this.needsQuestGiverUpdate = true
       end
     elseif entry[4] == "REINDEX" then

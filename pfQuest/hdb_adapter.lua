@@ -7,6 +7,16 @@ local questIdentityUnresolved = {}
 local questIdentityPending = {}
 local questIdentityFailed = {}
 
+local function RefreshQuestIdentityUI()
+  pfQuest.updateQuestLog = true
+  -- HDB identity queries complete asynchronously. The ordinary internal
+  -- quest-log refresh updates pins and tracker state but does not redraw the
+  -- visible header controls, so schedule the established UI-safe refresh too.
+  if QuestLogFrame and QuestLogFrame:IsShown() then
+    pfQuest.questLogOpenRefreshAt = GetTime() + 0.01
+  end
+end
+
 local function Enabled()
   return type(pfQuestHearthDB) == "table"
     and type(pfQuestHearthDB.GetQuestMapPinsAsync) == "function"
@@ -100,8 +110,13 @@ end
 
 local function CaptureQuestIdentityText(qlogid, preserveSelection)
   local description, objective = "", ""
-  if not preserveSelection then
-    local oldID = compat.GetQuestLogSelection()
+  local oldID = compat.GetQuestLogSelection()
+  -- Reading the row that is already selected is side-effect free. This is the
+  -- normal quest-log UI path and provides the text needed to identify
+  -- same-title quests without collapsing or expanding any headers.
+  if oldID == qlogid then
+    description, objective = compat.GetQuestLogQuestText()
+  elseif not preserveSelection then
     compat.SelectQuestLogEntry(qlogid)
     description, objective = compat.GetQuestLogQuestText()
     compat.SelectQuestLogEntry(oldID)
@@ -179,7 +194,7 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
     local accepted = pfQuestHearthDB:GetQuestIDsByTitleAsync(title, function(ids, err)
       questIdentityPending[slotKey] = nil
       if err or not ids then questIdentityFailed[slotKey] = true end
-      pfQuest.updateQuestLog = true
+      RefreshQuestIdentityUI()
     end)
     if accepted then return nil, true, true end
     questIdentityPending[slotKey] = nil
@@ -200,13 +215,13 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
     questIdentityPending[slotKey] = nil
     if err or not records then
       questIdentityFailed[slotKey] = true
-      pfQuest.updateQuestLog = true
+      RefreshQuestIdentityUI()
       return
     end
     local resolutionClass = records[1] and records[1].resolutionClass
     if resolutionClass == "PARTIAL" or resolutionClass == "UNRESOLVABLE" then
       questIdentityUnresolved[observationKey] = true
-      pfQuest.updateQuestLog = true
+      RefreshQuestIdentityUI()
       return
     end
 
@@ -214,22 +229,26 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
     local liveObjective = NormalizeQuestIdentityText(objective)
     local liveDescription = NormalizeQuestIdentityText(description)
 
-    -- Exact nonempty quest text is the first discriminator. A candidate with
-    -- absent text cannot match an absent client value by accident.
-    if liveObjective ~= "" or liveDescription ~= "" then
-      remaining = FilterQuestCandidates(remaining, function(record)
-        local objectiveMatches = liveObjective == "" or (
-          record.objective and NormalizeQuestIdentityText(
-            pfDatabase:FormatQuestText(record.objective)
-          ) == liveObjective
-        )
-        local descriptionMatches = liveDescription == "" or (
-          record.description and NormalizeQuestIdentityText(
-            pfDatabase:FormatQuestText(record.description)
-          ) == liveDescription
-        )
-        return objectiveMatches and descriptionMatches
+    -- Apply exact nonempty text discriminators in order. Keep a discriminator
+    -- only when it matches at least one candidate: a harmless server-side
+    -- wording difference must not erase an otherwise unique objective match.
+    -- Empty values never compare equal, and zero or tied results never guess.
+    if liveObjective ~= "" then
+      local objectiveMatches = FilterQuestCandidates(remaining, function(record)
+        return record.objective and NormalizeQuestIdentityText(
+          pfDatabase:FormatQuestText(record.objective)
+        ) == liveObjective
       end)
+      if table.getn(objectiveMatches) > 0 then remaining = objectiveMatches end
+    end
+
+    if table.getn(remaining) > 1 and liveDescription ~= "" then
+      local descriptionMatches = FilterQuestCandidates(remaining, function(record)
+        return record.description and NormalizeQuestIdentityText(
+          pfDatabase:FormatQuestText(record.description)
+        ) == liveDescription
+      end)
+      if table.getn(descriptionMatches) > 0 then remaining = descriptionMatches end
     end
 
     -- TEXT_UNIQUE groups are safe only when exact text leaves one candidate.
@@ -272,7 +291,7 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
     else
       questIdentityUnresolved[observationKey] = true
     end
-    pfQuest.updateQuestLog = true
+    RefreshQuestIdentityUI()
   end)
   if not accepted then
     questIdentityPending[slotKey] = nil
@@ -1145,6 +1164,52 @@ function pfDatabase:MarkQuestAcceptedHDB(id)
   end
 
   return false
+end
+
+-- Completing one quest normally changes only quests that list it as a direct
+-- prerequisite. Query that small set instead of rebuilding every available
+-- quest giver; the full refresh remains the caller's fallback if this request
+-- cannot be submitted.
+function pfDatabase:RefreshCompletedQuestGiversHDB(id, meta)
+  if not Enabled() or type(pfQuestHearthDB.GetQuestStartPinsAsync) ~= "function" then return false end
+  id = tonumber(id)
+  if not id then return false end
+  local _, race = UnitRace("player")
+  local _, class = UnitClass("player")
+  local levelRange = pfQuest_config["questpinlevelrange"] or "off"
+  if levelRange == "all" then levelRange = "off" end
+  local options = {
+    prerequisiteID = id,
+    level = UnitLevel("player"),
+    highOffset = pfQuest_config["showhighlevel"] == "1" and 3 or 0,
+    includeLow = pfQuest_config["showlowlevel"] == "1",
+    includeAllLevels = levelRange ~= "off",
+    includeEvents = pfQuest_config["showfestival"] == "1",
+    raceMask = pfDatabase:GetBitByRace(race),
+    classMask = pfDatabase:GetBitByClass(class),
+    faction = UnitFactionGroup("player") == "Horde" and "H" or "A",
+  }
+  local accepted = pfQuestHearthDB:GetQuestStartPinsAsync(options, function(pins, err)
+    if err or not pins then return end
+    pfDatabase:BuildSkillCache()
+    local visible = CollapseHDBItemStartPins(pfDatabase:FilterHDBAvailableStartPins(pins))
+    local byQuest = {}
+    for index = 1, table.getn(visible) do
+      local pin = visible[index]
+      byQuest[pin.questID] = byQuest[pin.questID] or {}
+      table.insert(byQuest[pin.questID], pin)
+    end
+    local plevel = UnitLevel("player")
+    for questID, list in pairs(byQuest) do
+      hdbQuestGiverPins[questID] = list
+      if not hdbQuestGiverSet[questID] then
+        for index = 1, table.getn(list) do AddAvailablePin(list[index], plevel, meta and meta.addon) end
+        if list[1] then hdbQuestGiverSet[questID] = list[1].quest end
+      end
+    end
+    pfMap.queue_update = GetTime()
+  end)
+  return accepted and true or false
 end
 
 function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)

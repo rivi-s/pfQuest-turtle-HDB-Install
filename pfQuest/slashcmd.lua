@@ -96,6 +96,27 @@ SlashCmdList["PFDB"] = function(input, editbox)
     return
   end
 
+  -- argument: hdbcache [questid]
+  if arg1 == "hdbcache" then
+    local questid = tonumber(arg2)
+    if not questid and pfQuest and pfQuest.questlog then
+      for id in pairs(pfQuest.questlog) do questid = id break end
+    end
+    local report = questid and pfDatabase:GetQuestHDBCacheReport(questid)
+    if not report then
+      DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpf|cffffffffQuest HDB cache: no active cached quest")
+      return
+    end
+    local missing = table.getn(report.missing)
+    DEFAULT_CHAT_FRAME:AddMessage(
+      "|cff33ffccpf|cffffffffQuest HDB cache " .. report.id
+      .. ": " .. report.pins .. " pins, " .. report.cachedSources
+      .. " cached sources, " .. report.normalSources .. " normal sources, "
+      .. (missing == 0 and "|cff33ff33match|r" or "|cffffaa00" .. missing .. " pending|r")
+    )
+    return
+  end
+
   -- argument: debug
   if arg1 == "debug" then
     pfQuest_config.debug = not pfQuest_config.debug
@@ -108,6 +129,16 @@ SlashCmdList["PFDB"] = function(input, editbox)
 
   -- argument: item
   if arg1 == "item" then
+    if pfDatabase:SearchItemTitleHDB(arg2, meta, nil, function(nativeMaps, err)
+      if err then
+        local fallback = pfDatabase:SearchItem(arg2, meta, "LOWER")
+        pfMap:ShowMapID(pfDatabase:GetBestMap(fallback))
+      else
+        pfMap:ShowMapID(pfDatabase:GetBestMap(nativeMaps))
+      end
+    end) then
+      return
+    end
     local maps = pfDatabase:SearchItem(arg2, meta, "LOWER")
     pfMap:ShowMapID(pfDatabase:GetBestMap(maps))
     return
@@ -115,6 +146,16 @@ SlashCmdList["PFDB"] = function(input, editbox)
 
   -- argument: vendor
   if arg1 == "vendor" then
+    if pfDatabase:SearchItemTitleHDB(arg2, meta, { V = true }, function(nativeMaps, err)
+      if err then
+        local fallback = pfDatabase:SearchVendor(arg2, meta, "LOWER")
+        pfMap:ShowMapID(pfDatabase:GetBestMap(fallback))
+      else
+        pfMap:ShowMapID(pfDatabase:GetBestMap(nativeMaps))
+      end
+    end) then
+      return
+    end
     local maps = pfDatabase:SearchVendor(arg2, meta, "LOWER")
     pfMap:ShowMapID(pfDatabase:GetBestMap(maps))
     return
@@ -122,6 +163,11 @@ SlashCmdList["PFDB"] = function(input, editbox)
 
   -- argument: unit
   if arg1 == "unit" then
+    if pfDatabase:SearchEntityTitleHDB("U", arg2, meta, function(nativeMaps)
+      pfMap:ShowMapID(pfDatabase:GetBestMap(nativeMaps))
+    end) then
+      return
+    end
     local maps = pfDatabase:SearchMob(arg2, meta, "LOWER")
     pfMap:ShowMapID(pfDatabase:GetBestMap(maps))
     return
@@ -129,6 +175,11 @@ SlashCmdList["PFDB"] = function(input, editbox)
 
   -- argument: object
   if arg1 == "object" then
+    if pfDatabase:SearchEntityTitleHDB("O", arg2, meta, function(nativeMaps)
+      pfMap:ShowMapID(pfDatabase:GetBestMap(nativeMaps))
+    end) then
+      return
+    end
     local maps = pfDatabase:SearchObject(arg2, meta, "LOWER")
     pfMap:ShowMapID(pfDatabase:GetBestMap(maps))
     return
@@ -136,6 +187,17 @@ SlashCmdList["PFDB"] = function(input, editbox)
 
   -- argument: quest
   if arg1 == "quest" then
+    if pfDatabase:SearchQuestTitleHDB(arg2, meta, function(nativeMaps, err, ids)
+      if err then
+        local fallback = pfDatabase:SearchQuest(arg2, meta, "LOWER")
+        pfMap:ShowMapID(pfDatabase:GetBestMap(fallback))
+      else
+        local hubMap = ids and table.getn(ids) == 1 and pfQuest:GetQuestHubMap(ids[1])
+        pfMap:ShowMapID(hubMap or pfDatabase:GetBestMap(nativeMaps))
+      end
+    end) then
+      return
+    end
     local maps = pfDatabase:SearchQuest(arg2, meta, "LOWER")
     pfMap:ShowMapID(pfDatabase:GetBestMap(maps))
     return

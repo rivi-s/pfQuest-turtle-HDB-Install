@@ -1,0 +1,7 @@
+## Interface: 11200
+## Title: pfQuest HDB Hitch Profiler
+## Notes: Temporary low-noise frame and callback timing instrumentation
+## Dependencies: pfQuest
+## OptionalDeps: pfQuest-turtle,pfQuest-HearthDB,pfQuest-HearthDB-turtle
+
+profiler.lua
