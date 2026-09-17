@@ -102,7 +102,14 @@ postRewardRefresh:SetScript("OnUpdate", function()
     if pfQuest and pfQuest.UpdateQuestlog then
         pfQuest:UpdateQuestlog()
         pfQuest.updateQuestLog = true
-        pfQuest.updateQuestGivers = true
+        -- Do not also force the complete available-quest-giver rescan here.
+        -- A completed quest already gets the cheap, correctly-scoped refresh
+        -- from quest.lua's own REMOVE handling (RefreshCompletedQuestGiversHDB),
+        -- and skill/level unlocks already set this flag from their own events.
+        -- Forcing it again on every automated turn-in queued an unfiltered
+        -- HDB scan of every eligible quest giver (tens of thousands of rows)
+        -- 0.35s after each reward, which reads as a hitch once auto-complete
+        -- chains several turn-ins back to back.
     end
     if pfMap then
         pfMap.queue_update = GetTime()
