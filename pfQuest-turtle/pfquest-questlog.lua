@@ -67,6 +67,33 @@ questLogFrame:RegisterEvent('QUEST_COMPLETE')
 questLogFrame:RegisterEvent('QUEST_GREETING')
 questLogFrame:RegisterEvent('QUEST_PROGRESS')
 
+-- Diagnostic aid for the quest-dialog automation. Several talk-only quests
+-- have been reported as not auto-completing despite passing static review of
+-- IsGreetingQuestReady/SelectAutoQuestDialog; this prints what each selector
+-- actually observes so a live report can include real telemetry instead of
+-- guesswork. Opt-in and silent by default.
+local hdbAutoDebugEnabled = false
+local function DebugAuto(message)
+    if not hdbAutoDebugEnabled then return end
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccHDB auto:|r " .. message)
+end
+
+SLASH_HDBAUTO1 = "/hdbauto"
+SlashCmdList["HDBAUTO"] = function(message)
+    message = string.lower(message or "")
+    if message == "on" or (message == "" and not hdbAutoDebugEnabled) then
+        hdbAutoDebugEnabled = true
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccHDB auto:|r ON")
+    elseif message == "off" or message == "" then
+        hdbAutoDebugEnabled = false
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccHDB auto:|r OFF")
+    elseif message == "status" then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccHDB auto:|r " .. (hdbAutoDebugEnabled and "ON" or "OFF"))
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccHDB auto:|r use /hdbauto on, /hdbauto off, or /hdbauto status")
+    end
+end
+
 -- Selecting a quest changes the dialog asynchronously. Repeated right-clicks
 -- can emit another greeting/gossip event before that transition completes.
 -- Use a short debounce instead of persistent state: some Turtle dialogs do not
@@ -322,10 +349,14 @@ local function SelectFirstCompletedActiveQuest()
     end
 
     local numActiveQuests = GetNumActiveQuests()
+    DebugAuto("active quest list: count=" .. tostring(numActiveQuests))
     for i = 1, numActiveQuests do
         local title = GetActiveTitle(i)
-        if title and IsGreetingQuestReady(title) then
+        local ready = title and IsGreetingQuestReady(title)
+        DebugAuto("active[" .. i .. "] title=" .. tostring(title) .. " ready=" .. tostring(ready and true or false))
+        if title and ready then
             SelectActiveQuest(i)
+            DebugAuto("SelectFirstCompletedActiveQuest matched: " .. title)
             return true
         end
     end
@@ -352,8 +383,12 @@ local function SelectFirstCompletedGossipActiveQuest()
             -- for client variants that omit the flag.
             local hasCompleteFlag = type(active[i + 3]) == "boolean"
             local isComplete = hasCompleteFlag and active[i + 3] or false
-            if isComplete or IsGreetingQuestReady(active[i]) then
+            local greetingReady = IsGreetingQuestReady(active[i])
+            DebugAuto("gossip-active[" .. questIndex .. "] title=" .. tostring(active[i])
+                .. " isComplete=" .. tostring(isComplete) .. " greetingReady=" .. tostring(greetingReady))
+            if isComplete or greetingReady then
                 SelectGossipActiveQuest(questIndex)
+                DebugAuto("SelectFirstCompletedGossipActiveQuest matched: " .. tostring(active[i]))
                 return true
             end
             if hasCompleteFlag then
@@ -375,10 +410,24 @@ local function SelectAutoQuestDialog()
     -- Turtle can expose either list family for the same NPC and can populate
     -- them on different frames. Always inspect both, prefer ready turn-ins,
     -- and accept an available quest only when no ready turn-in is visible.
-    return SelectFirstCompletedActiveQuest()
-        or SelectFirstCompletedGossipActiveQuest()
-        or SelectFirstAvailableQuest()
-        or SelectFirstGossipAvailableQuest()
+    if SelectFirstCompletedActiveQuest() then
+        DebugAuto("SelectAutoQuestDialog: matched SelectFirstCompletedActiveQuest")
+        return true
+    end
+    if SelectFirstCompletedGossipActiveQuest() then
+        DebugAuto("SelectAutoQuestDialog: matched SelectFirstCompletedGossipActiveQuest")
+        return true
+    end
+    if SelectFirstAvailableQuest() then
+        DebugAuto("SelectAutoQuestDialog: matched SelectFirstAvailableQuest")
+        return true
+    end
+    if SelectFirstGossipAvailableQuest() then
+        DebugAuto("SelectAutoQuestDialog: matched SelectFirstGossipAvailableQuest")
+        return true
+    end
+    DebugAuto("SelectAutoQuestDialog: no candidate matched")
+    return false
 end
 
 -- Turtle may populate normal or gossip quest lists shortly after the initial
