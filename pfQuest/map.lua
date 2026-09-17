@@ -1510,8 +1510,7 @@ function pfMap:UpdateNodes()
     end
     local playerX, playerY = GetPlayerMapPosition("player")
     playerX, playerY = (playerX or 0) * 100, (playerY or 0) * 100
-    local nearestRawRoute
-    local nearestRawDistance
+    local rawObjectiveCandidates = {}
     for coords, node in pairs(questNodes or {}) do
       local x, y
       if coord_cache[coords] then
@@ -1540,14 +1539,18 @@ function pfMap:UpdateNodes()
         end
       end
 
+      local rawObjective = routeNode and routeNode.layer == 1 and not routeNode.texture
+        and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
+      if rawObjective then
+        table.insert(rawObjectiveCandidates, { x, y, routeNode, nil, true })
+      end
+
       if rebuildRoute and routeNode then
         -- The hidden World Map path deliberately skips cluster-frame work.
         -- Item-loot and kill objectives therefore remain ordinary spawn nodes
         -- (layer 1) even when objective routing is enabled. Treat those raw
         -- objective nodes as the route source until the visible map builds
         -- its clusters.
-        local rawObjective = routeNode.layer == 1 and not routeNode.texture
-          and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
         local routeEligible =
           (pfQuest_config["routecluster"] == "1" and (routeNode.layer >= 9 or rawObjective))
           or (pfQuest_config["routeender"] == "1" and routeNode.layer == 4)
@@ -1561,23 +1564,13 @@ function pfMap:UpdateNodes()
         hidden = hidden or (pfQuest_config["showcluster"] == "0" and routeNode.cluster)
         hidden = hidden or (pfQuest_config["showspawn"] == "0" and not routeNode.texture)
         if routeEligible and not hidden then
-          if rawObjective then
-            -- Closed-map rendering has no cluster frames. Keep only the
-            -- nearest raw objective as an arrow target; routing through every
-            -- loot source produces a huge, meaningless zone-wide path.
-            local dx, dy = (x - playerX) * 1.5, y - playerY
-            local distance = dx * dx + dy * dy
-            if not nearestRawDistance or distance < nearestRawDistance then
-              nearestRawDistance = distance
-              nearestRawRoute = { x, y, routeNode }
-            end
-          else
+          if not rawObjective then
             pfQuest.route:AddPoint({ x, y, routeNode })
           end
         end
       end
     end
-    if rebuildRoute and nearestRawRoute then pfQuest.route:AddPoint(nearestRawRoute) end
+    pfQuest.route:SetRawObjectiveCandidates(rawObjectiveCandidates)
     if pfQuest.tracker and pfQuest.tracker.DoLayout then
       pfQuest.tracker.DoLayout()
     end
@@ -1592,6 +1585,16 @@ function pfMap:UpdateNodes()
     pfQuest.route:Reset()
     pfMap.lastRouteMap = map
   end
+
+  -- The loop below only sends clustered/ender/starter pins through AddPoint,
+  -- to avoid drawing a route through every raw spawn. A lone (non-clustered)
+  -- item/unit objective never qualifies for that, so without this it was
+  -- invisible to routing entirely while the map was open -- only a
+  -- coincidentally cluster- or ender-eligible objective elsewhere could ever
+  -- win the arrow, regardless of which one was actually closer. Collect raw
+  -- objective candidates here too, same as the hidden-map path above, so
+  -- route.lua's OnUpdate can pick the nearest one every tick.
+  local rawObjectiveCandidates = {}
 
   -- refresh all nodes
   local n_pins, n_skipped = 0, 0
@@ -1638,6 +1641,30 @@ function pfMap:UpdateNodes()
           local _, _, strx, stry = strfind(coords, "(.*)|(.*)")
           x, y = strx + 0, stry + 0
           coord_cache[coords] = { x, y }
+        end
+
+        -- Mirror the hidden-map path's raw-objective detection: pick the
+        -- same highest-priority entry UpdateNode would bind to this pin,
+        -- without touching frame state.
+        do
+          local routeNode
+          local routeLayer = 0
+          for title, meta in pairs(node) do
+            local layer = GetLayerByTexture(meta.texture)
+            if meta.cluster and meta.priority then
+              layer = layer + (10 - min(meta.priority, 10))
+            end
+            if meta.spawn and (layer > routeLayer or not routeNode) then
+              routeNode = meta
+              routeNode.title = title
+              routeLayer = layer
+            end
+          end
+          local rawObjective = routeNode and routeLayer == 1 and not routeNode.texture
+            and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
+          if rawObjective then
+            table.insert(rawObjectiveCandidates, { x, y, routeNode, nil, true })
+          end
         end
 
         -- Route eligibility is determined here, but the point is only added
@@ -1694,6 +1721,7 @@ function pfMap:UpdateNodes()
       end
     end
   end
+  pfQuest.route:SetRawObjectiveCandidates(rawObjectiveCandidates)
   pfQuest:Debug(format("UpdateNodes pins=%d skipped=%d", n_pins, n_skipped))
 
   -- hide remaining pins

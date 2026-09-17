@@ -163,6 +163,13 @@ pfQuest.route = CreateFrame("Frame", "pfQuestRoute", WorldFrame)
 pfQuest.route.firstnode = nil
 pfQuest.route.coords = {}
 
+-- Declared here (ahead of its later re-declaration below, which now just
+-- reuses this upvalue) so Reset() can drop a stale automatic-target lock.
+-- Without this, a target picked before a map/zone change could keep winning
+-- the "stay put" tie-break in OnUpdate even after it stopped being the
+-- nearest candidate, since Reset() only ever cleared self.coords/firstnode.
+local automaticTargetKey = nil
+
 pfQuest.route.Reset = function(self)
   self.coords = {}
   self.firstnode = nil
@@ -170,6 +177,7 @@ pfQuest.route.Reset = function(self)
   self.lastDrawX = nil
   self.lastDrawY = nil
   self.lastDrawNode = nil
+  automaticTargetKey = nil
 end
 
 pfQuest.route.Clear = function(self)
@@ -184,6 +192,24 @@ end
 
 pfQuest.route.AddPoint = function(self, tbl)
   table.insert(self.coords, tbl)
+  self.firstnode = nil
+  self.recalculate = true
+end
+
+-- Closed-map item objectives retain their full set of raw spawn candidates
+-- here. The map updater can stay cheap while the route retargets as the player
+-- moves, without drawing a path through every spawn in the zone.
+pfQuest.route.SetRawObjectiveCandidates = function(self, candidates)
+  if candidates and next(candidates) then
+    self.rawObjectiveCandidates = candidates
+    return
+  end
+
+  if not self.rawObjectiveCandidates then return end
+  self.rawObjectiveCandidates = nil
+  for index = table.getn(self.coords), 1, -1 do
+    if self.coords[index][5] then table.remove(self.coords, index) end
+  end
   self.firstnode = nil
   self.recalculate = true
 end
@@ -245,7 +271,6 @@ pfQuest.route.IsTarget = function(node)
 end
 
 local lastpos, completed = 0, 0
-local automaticTargetKey = nil
 local function TargetKey(data)
   if not data then return nil end
   local node = data[3]
@@ -293,6 +318,33 @@ pfQuest.route:SetScript("OnUpdate", function()
 
   -- update distances to player
   this:UpdateDistances()
+
+  -- Keep a single raw item-objective route point, but choose it on every
+  -- movement tick. This gives the arrow the useful nearest-target behavior of
+  -- the old multi-spawn route without restoring its enormous map path.
+  if not targetTitle and this.rawObjectiveCandidates then
+    local nearest, nearestDistance
+    for _, candidate in ipairs(this.rawObjectiveCandidates) do
+      local dx, dy = (xplayer * 100 - candidate[1]) * 1.5, yplayer * 100 - candidate[2]
+      candidate[4] = ceil(math.sqrt(dx * dx + dy * dy) * 100) / 100
+      if not nearestDistance or candidate[4] < nearestDistance then
+        nearest, nearestDistance = candidate, candidate[4]
+      end
+    end
+    if nearest and TargetKey(nearest) ~= automaticTargetKey then
+      for index = table.getn(this.coords), 1, -1 do
+        if this.coords[index][5] then table.remove(this.coords, index) end
+      end
+      table.insert(this.coords, nearest)
+      this.firstnode = nil
+      this.recalculate = true
+      -- Update the lock immediately. The "stay near current pick" stability
+      -- check below still reads the pre-swap key on this same tick otherwise,
+      -- and can pull the stale target straight back before the fresh, closer
+      -- pick above ever gets a chance to show.
+      automaticTargetKey = TargetKey(nearest)
+    end
+  end
   -- Reorder only when the available route nodes or an explicit target change.
   -- Re-sorting every second while the player moves causes route flicker and
   -- expensive map redraws without improving the selected objective.
