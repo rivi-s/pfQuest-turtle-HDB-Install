@@ -514,7 +514,13 @@ function pfDatabase:SearchQuestPreviewHDB(id, meta, callback)
         elseif pin.targetKind == "A" then nodeMeta.QTYPE = "AREATRIGGER_OBJECTIVE"
         elseif pin.targetKind == "Z" then nodeMeta.QTYPE = "ZONE_OBJECTIVE"
         elseif pin.originKind == "I" then
-          nodeMeta.QTYPE, nodeMeta.item, nodeMeta.droprate = "ITEM_OBJECTIVE_LOOT", pin.itemTitle or pfDB.items.loc[pin.originID], pin.chance
+          nodeMeta.QTYPE, nodeMeta.item = "ITEM_OBJECTIVE_LOOT", pin.itemTitle or pfDB.items.loc[pin.originID]
+          if pin.sourceKind == "V" then
+            nodeMeta.texture = pfQuestConfig.path .. "\\img\\icon_vendor"
+            nodeMeta.sellcount = pin.chance
+          else
+            nodeMeta.droprate = pin.chance
+          end
         elseif pin.originKind == "IR" then
           nodeMeta.QTYPE, nodeMeta.itemreq = pin.targetKind == "O" and "OBJECT_OBJECTIVE_ITEMREQ" or "UNIT_OBJECTIVE_ITEMREQ", requirement
         else nodeMeta.QTYPE = pin.targetKind == "O" and "OBJECT_OBJECTIVE" or "UNIT_OBJECTIVE" end
@@ -852,6 +858,7 @@ AddPin = function(id, qlogid, quest, pin, complete)
   local item
   local spawn = pin.title
   local spawntype = pin.targetKind == "O" and pfQuest_Loc["Object"] or pfQuest_Loc["Unit"]
+  if pin.sourceKind == "V" then texture = pfQuestConfig.path .. "\\img\\icon_vendor" end
   if pin.targetKind == "U" and pin.rank and pin.rank ~= "" then
     pfDB.units.data[pin.targetID] = pfDB.units.data[pin.targetID] or {}
     pfDB.units.data[pin.targetID].rnk = pin.rank
@@ -894,7 +901,8 @@ AddPin = function(id, qlogid, quest, pin, complete)
     x = pin.x,
     y = pin.y,
     respawn = pin.respawn and SecondsToTime(pin.respawn) or "N/A",
-    droprate = pin.chance,
+    droprate = pin.sourceKind == "V" and nil or pin.chance,
+    sellcount = pin.sourceKind == "V" and pin.chance or nil,
     texture = texture,
     item = item,
     itemreq = pin.originKind == "IR" and (pin.itemTitle or pfDB.items.loc[pin.originID]) or nil,

@@ -979,26 +979,31 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
 
   local sql = [[WITH resolved_target AS (
       -- Keep original quest links for objective semantics.
-      SELECT quest_id, phase, target_kind, target_id, target_kind AS origin_kind, target_id AS origin_id, NULL AS chance
+      SELECT quest_id, phase, target_kind, target_id, target_kind AS origin_kind, target_id AS origin_id, NULL AS chance,
+        target_kind AS source_kind
       FROM quest_target WHERE target_kind <> 'IR'
       UNION
       -- Item requirements encode a direct source in pfQuest's database.
-      SELECT q.quest_id, q.phase, ir.source_kind, ir.source_id, q.target_kind, q.target_id, NULL AS chance
+      SELECT q.quest_id, q.phase, ir.source_kind, ir.source_id, q.target_kind, q.target_id, NULL AS chance,
+        ir.source_kind AS source_kind
       FROM quest_target q JOIN item_requirement ir
         ON q.target_kind = 'IR' AND ir.item_id = q.target_id
       UNION
       -- Normal item objectives need direct and reference-loot sources.
-      SELECT q.quest_id, q.phase, s.source_kind, s.source_id, q.target_kind, q.target_id, s.chance
+      SELECT q.quest_id, q.phase, CASE WHEN s.source_kind = 'V' THEN 'U' ELSE s.source_kind END, s.source_id,
+        q.target_kind, q.target_id, s.chance, s.source_kind
       FROM quest_target q JOIN item_source s
         ON q.target_kind = 'I' AND s.item_id = q.target_id
-      WHERE s.source_kind IN ('U', 'O')
+      WHERE s.source_kind IN ('U', 'O', 'V')
       UNION
-      SELECT q.quest_id, q.phase, r.source_kind, r.source_id, q.target_kind, q.target_id, s.chance
+      SELECT q.quest_id, q.phase, CASE WHEN r.source_kind = 'V' THEN 'U' ELSE r.source_kind END, r.source_id,
+        q.target_kind, q.target_id, s.chance, r.source_kind
       FROM quest_target q JOIN item_source s
         ON q.target_kind = 'I' AND s.item_id = q.target_id AND s.source_kind = 'R'
       JOIN refloot_source r ON r.reference_id = s.source_id
     )
-    SELECT q.phase, q.target_kind, q.target_id, q.origin_kind, q.origin_id, q.chance, COALESCE(em.level, 'N/A'), em.rank,
+    SELECT q.phase, q.target_kind, q.target_id, q.origin_kind, q.origin_id, q.chance, q.source_kind,
+      COALESCE(em.level, 'N/A'), em.rank,
       COALESCE(s.x, a.x, z.x), COALESCE(s.y, a.y, z.y),
       COALESCE(s.zone_id, a.zone_id, z.map_id), COALESCE(s.respawn, '0'),
       COALESCE(e.title, zt.title,
@@ -1035,10 +1040,10 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
         originKind = row[4],
         originID = tonumber(row[5]),
         chance = tonumber(row[6]),
-        level = row[7],
-        rank = row[8], x = tonumber(row[9]),
-        y = tonumber(row[10]), zoneID = tonumber(row[11]),
-        respawn = tonumber(row[12]), title = row[13], itemTitle = row[14],
+        sourceKind = row[7], level = row[8],
+        rank = row[9], x = tonumber(row[10]),
+        y = tonumber(row[11]), zoneID = tonumber(row[12]),
+        respawn = tonumber(row[13]), title = row[14], itemTitle = row[15],
       })
     end
     questTargetCache[cacheKey] = records
