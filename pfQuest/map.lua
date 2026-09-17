@@ -592,9 +592,10 @@ end
 
 function pfMap:ShowMapID(map)
   if map then
+    local wasShown = WorldMapFrame:IsShown()
     if ToggleWorldMap then
       -- vanilla & tbc
-      if not WorldMapFrame:IsShown() then
+      if not wasShown then
         ToggleWorldMap()
       end
     else
@@ -602,8 +603,21 @@ function pfMap:ShowMapID(map)
       WorldMapFrame:Show()
     end
 
-    pfMap:SetMapByID(map)
-    pfMap:UpdateNodes()
+    if wasShown then
+      pfMap:SetMapByID(map)
+      pfMap:UpdateNodes()
+    else
+      -- Blizzard's own World Map frame has not finished laying itself out on
+      -- the same frame it is first shown. Zooming immediately afterward can
+      -- read a nil GetCenter() from its positioning guide and error inside
+      -- Blizzard's FrameXML. Give it one frame to settle before zooming.
+      local deferFrame = CreateFrame("Frame")
+      deferFrame:SetScript("OnUpdate", function()
+        this:SetScript("OnUpdate", nil)
+        pfMap:SetMapByID(map)
+        pfMap:UpdateNodes()
+      end)
+    end
     return true
   end
 

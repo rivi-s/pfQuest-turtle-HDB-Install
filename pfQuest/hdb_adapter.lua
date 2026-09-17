@@ -303,7 +303,15 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
 
     if table.getn(remaining) == 1 and remaining[1].id then
       questIdentityCache[observationKey] = remaining[1].id
-    else
+    elseif liveObjective ~= "" or liveDescription ~= "" or next(liveTargets) then
+      -- Only lock this observation in as unresolved when it actually had some
+      -- text or objective signal to discriminate on. A background scan that
+      -- deliberately skipped reading an unselected quest-log row's text (see
+      -- CaptureQuestIdentityText's preserveSelection branch) captures nothing
+      -- at all here, and caching that as a permanent negative result would
+      -- keep this quest unresolved for the rest of the session even after
+      -- real text becomes available -- for example, until the player selects
+      -- it in the Quest Log or runs a command that forces a real read.
       questIdentityUnresolved[observationKey] = true
     end
     RefreshQuestIdentityUI()
