@@ -496,6 +496,16 @@ questLogFrame:SetScript("OnEvent", function()
             return
         end
 
+        -- A greeting opens a new NPC dialog, distinct from whatever reward
+        -- guard applied to a previously closed one. Quests with zero
+        -- leaderboard objectives (the pure talk/report case) can jump
+        -- straight from this greeting to QUEST_COMPLETE without an
+        -- intervening QUEST_PROGRESS, so QUEST_PROGRESS's own reset below
+        -- never runs for them. Leaving rewardedCurrentDialog set from an
+        -- earlier, unrelated completion this session would then silently
+        -- swallow this NPC's very real reward.
+        rewardedCurrentDialog = false
+
         -- Selecting a turn-in opens the completion dialog on the next client
         -- update. QUEST_COMPLETE below then safely claims a no-choice reward.
         if not SelectAutoQuestDialog() then
@@ -516,6 +526,11 @@ questLogFrame:SetScript("OnEvent", function()
             RetryAutoQuestDialog()
             return
         end
+
+        -- See the matching comment under QUEST_GREETING: this may be a new,
+        -- unrelated completion and must not inherit the previous dialog's
+        -- reward guard.
+        rewardedCurrentDialog = false
 
         if not SelectAutoQuestDialog() then
             EndInteraction()
