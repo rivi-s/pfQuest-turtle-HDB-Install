@@ -578,6 +578,17 @@ pfQuest.route.arrow:SetScript("OnUpdate", function()
   end
   this.tick = GetTime() + 0.05
 
+  -- GetPlayerMapPosition() resolves relative to whichever zone the World
+  -- Map is currently displaying, not the player's real zone, so browsing a
+  -- different zone makes it return 0,0 -- the same signal as a genuinely
+  -- unresolvable position. That is not the player being lost; skip the
+  -- position-dependent work below without touching visibility or the
+  -- invalid-debounce, so the arrow simply keeps pointing at its last known
+  -- direction until browsing ends.
+  if pfMap and pfMap.browsingOtherZone then
+    return
+  end
+
   xplayer, yplayer = GetPlayerMapPosition("player")
   wrongmap = xplayer == 0 and yplayer == 0 and true or nil
   target = not this.parent.targetMissing and this.parent.coords and this.parent.coords[1]

@@ -1427,6 +1427,14 @@ function pfMap:UpdateNodes()
   -- that zone briefly. Hidden route/tracker work always belongs to the player.
   if not worldMapShown and playerMap then map = playerMap end
   local updateRoute = not playerMap or map == playerMap
+  -- GetPlayerMapPosition() resolves relative to whichever zone the World Map
+  -- is currently displaying, not the player's real zone. Browsing elsewhere
+  -- therefore makes it return 0,0, which route.lua's own OnUpdate scripts
+  -- would otherwise read as "position unresolvable" and hide the arrow /
+  -- clear the drawn path -- even though the player isn't actually lost, they
+  -- just aren't looking at their own zone. Expose that distinction so those
+  -- scripts can tell "browsing away" apart from a genuine invalid position.
+  pfMap.browsingOtherZone = worldMapShown and not updateRoute or nil
   if pfQuest.route and pfQuest.route.SetWorldMapRouteVisible then
     pfQuest.route:SetWorldMapRouteVisible(not worldMapShown or updateRoute)
   end
