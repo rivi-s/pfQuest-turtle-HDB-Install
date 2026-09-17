@@ -280,14 +280,20 @@ local function sortfunc(a, b)
   -- Distances are rounded to two decimals, so ties are common.  UpdateNodes
   -- rebuilds its list through pairs(), whose order is undefined; without a
   -- deterministic tie-breaker the first route target can flip every refresh.
-  if a[4] ~= b[4] then
-    return a[4] < b[4]
+  -- Some legacy map pins have no coordinate pair, so UpdateDistances leaves
+  -- their distance nil. Keep those incomplete points after usable targets.
+  local adistance = tonumber(a[4]) or math.huge
+  local bdistance = tonumber(b[4]) or math.huge
+  if adistance ~= bdistance then
+    return adistance < bdistance
   end
-  if a[1] ~= b[1] then
-    return a[1] < b[1]
+  local ax, bx = tonumber(a[1]) or math.huge, tonumber(b[1]) or math.huge
+  if ax ~= bx then
+    return ax < bx
   end
-  if a[2] ~= b[2] then
-    return a[2] < b[2]
+  local ay, by = tonumber(a[2]) or math.huge, tonumber(b[2]) or math.huge
+  if ay ~= by then
+    return ay < by
   end
 
   local an = a[3] and (a[3].title or a[3].spawn or "") or ""
@@ -364,7 +370,7 @@ pfQuest.route:SetScript("OnUpdate", function()
       end
       if previousIndex and previousIndex > 1 then
         local previous = this.coords[previousIndex]
-        if previous[4] <= this.coords[1][4] + 0.5 then
+        if previous[4] and this.coords[1][4] and previous[4] <= this.coords[1][4] + 0.5 then
           table.remove(this.coords, previousIndex)
           table.insert(this.coords, 1, previous)
         end
@@ -508,6 +514,18 @@ end)
 pfQuest.route.drawlayer = CreateFrame("Frame", "pfQuestRouteDrawLayer", WorldMapButton)
 pfQuest.route.drawlayer:SetFrameLevel(113)
 pfQuest.route.drawlayer:SetAllPoints()
+
+-- World-map route lines use zone-relative coordinates. Browsing another zone
+-- must hide that layer without clearing the current-zone route used by the
+-- independent arrow and minimap path.
+pfQuest.route.SetWorldMapRouteVisible = function(self, visible)
+  if not self.drawlayer then return end
+  if visible then
+    self.drawlayer:Show()
+  else
+    self.drawlayer:Hide()
+  end
+end
 
 WorldMapButton.routes = CreateFrame("Frame", "pfQuestRouteDisplay", pfQuest.route.drawlayer)
 WorldMapButton.routes:SetAllPoints()

@@ -1421,6 +1421,15 @@ function pfMap:UpdateNodes()
 
   local color = pfQuest_config["spawncolors"] == "1" and "spawn" or "title"
   local map = pfMap:GetMapID(GetCurrentMapContinent(), GetCurrentMapZone())
+  local playerMap = pfMap:GetPlayerMapID()
+  local worldMapShown = WorldMapFrame:IsShown()
+  -- Closing a manually selected zone can leave the client's map selection on
+  -- that zone briefly. Hidden route/tracker work always belongs to the player.
+  if not worldMapShown and playerMap then map = playerMap end
+  local updateRoute = not playerMap or map == playerMap
+  if pfQuest.route and pfQuest.route.SetWorldMapRouteVisible then
+    pfQuest.route:SetWorldMapRouteVisible(not worldMapShown or updateRoute)
+  end
   local i = 1
 
   -- reset tracker
@@ -1430,8 +1439,13 @@ function pfMap:UpdateNodes()
   -- render their own pins there, but the core zone-node renderer must not use
   -- nil as a dirty-map key.
   if not map then
-    pfQuest.route:Clear()
-    pfMap.lastRouteMap = nil
+    -- Browsing a continent/world surface must not discard the current-zone
+    -- arrow. Only a hidden-map refresh with no resolvable player map may clear
+    -- route state.
+    if not worldMapShown then
+      pfQuest.route:Clear()
+      pfMap.lastRouteMap = nil
+    end
     for _, pin in pairs(pfMap.pins) do
       pin:Hide()
     end
@@ -1445,8 +1459,7 @@ function pfMap:UpdateNodes()
 
   -- Current Zone Only follows the player's zone, not a different zone selected
   -- while browsing the World Map.
-  if tonumber(pfQuest_config["trackingmethod"]) == 5 and pfMap:GetPlayerMapID() and map ~= pfMap:GetPlayerMapID() then
-    pfQuest.route:Clear()
+  if tonumber(pfQuest_config["trackingmethod"]) == 5 and playerMap and map ~= playerMap then
     for _, pin in pairs(pfMap.pins) do pin:Hide() end
     if pfQuest.tracker and pfQuest.tracker.DoLayout then pfQuest.tracker.DoLayout() end
     return
@@ -1496,7 +1509,7 @@ function pfMap:UpdateNodes()
   -- hitch. Refresh only the quest tracker here; minimap pins have their own
   -- updater, and dirtyMaps keeps the full world-map render pending until the
   -- player actually opens it.
-  if not WorldMapFrame:IsShown() then
+  if not worldMapShown then
     local questNodes = pfMap.nodes.PFQUEST and pfMap.nodes.PFQUEST[map]
     -- A login or asynchronous HDB load can establish lastRouteMap before the
     -- quest nodes arrive. Rebuild when nodes exist but the route is still
@@ -1581,7 +1594,7 @@ function pfMap:UpdateNodes()
   -- A tracker/UI refresh can call UpdateNodes without changing any map node.
   -- Keep the existing route in that case; resetting it redraws the path every
   -- couple of seconds even though its inputs are unchanged.
-  if pfMap.lastRouteMap ~= map or pfMap.dirtyMaps[map] then
+  if updateRoute and (pfMap.lastRouteMap ~= map or pfMap.dirtyMaps[map]) then
     pfQuest.route:Reset()
     pfMap.lastRouteMap = map
   end
@@ -1662,7 +1675,7 @@ function pfMap:UpdateNodes()
           end
           local rawObjective = routeNode and routeLayer == 1 and not routeNode.texture
             and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
-          if rawObjective then
+          if updateRoute and rawObjective then
             table.insert(rawObjectiveCandidates, { x, y, routeNode, nil, true })
           end
         end
@@ -1711,7 +1724,7 @@ function pfMap:UpdateNodes()
           end
 
           pfMap.pins[i]:Show()
-          if routeEligible then
+          if updateRoute and routeEligible then
             pfQuest.route:AddPoint({ x, y, pfMap.pins[i] })
           end
         end
@@ -1721,7 +1734,9 @@ function pfMap:UpdateNodes()
       end
     end
   end
-  pfQuest.route:SetRawObjectiveCandidates(rawObjectiveCandidates)
+  if updateRoute then
+    pfQuest.route:SetRawObjectiveCandidates(rawObjectiveCandidates)
+  end
   pfQuest:Debug(format("UpdateNodes pins=%d skipped=%d", n_pins, n_skipped))
 
   -- hide remaining pins
