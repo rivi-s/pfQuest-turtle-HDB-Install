@@ -230,7 +230,11 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
       return
     end
     local resolutionClass = records[1] and records[1].resolutionClass
-    if resolutionClass == "PARTIAL" or resolutionClass == "UNRESOLVABLE" then
+    -- PARTIAL only means that not every stored row carries a discriminator.
+    -- It must still be allowed to resolve when this live row has an exact,
+    -- nonempty objective or description match. UNRESOLVABLE has no safe
+    -- discriminator, so it remains deliberately unresolved.
+    if resolutionClass == "UNRESOLVABLE" then
       questIdentityUnresolved[observationKey] = true
       RefreshQuestIdentityUI()
       return
