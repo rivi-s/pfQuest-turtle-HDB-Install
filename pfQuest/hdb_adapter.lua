@@ -88,6 +88,17 @@ function pfDatabase:GetQuestTextHDB(id, callback)
   return accepted and true or false
 end
 
+-- The static Lua quest table is intentionally incomplete in HDB installs.
+-- Resolve the Show-button destination from the provider's direct start/end
+-- hub query instead, preserving the established end-before-start behavior.
+function pfDatabase:GetQuestHubMapHDB(id, callback)
+  if not Enabled() or type(pfQuestHearthDB.GetQuestHubMapAsync) ~= "function" then
+    return false
+  end
+  local accepted = pfQuestHearthDB:GetQuestHubMapAsync(id, callback)
+  return accepted and true or false
+end
+
 function pfDatabase:GetQuestTitleByIDHDB(id)
   if not Enabled() or type(pfQuestHearthDB.GetCachedQuestTitleByID) ~= "function" then
     return nil, false, false

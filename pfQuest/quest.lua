@@ -895,7 +895,17 @@ function pfQuest:AddQuestLogIntegration()
 
     local maps, meta = {}, { ["addon"] = "PFQUEST", ["qlogid"] = questIndex }
     if type(pfDatabase.SearchQuestIDHDB) == "function" and pfDatabase:SearchQuestIDHDB(id, meta) then
-      pfMap:ShowMapID(pfQuest:GetQuestHubMap(id))
+      -- Native quest rows can exist without a matching entry in the legacy
+      -- Lua table. Wait for the HDB start/end hub lookup before opening the
+      -- map; static data remains the fallback for non-HDB or incomplete rows.
+      local fallbackMap = pfQuest:GetQuestHubMap(id)
+      if type(pfDatabase.GetQuestHubMapHDB) == "function"
+        and pfDatabase:GetQuestHubMapHDB(id, function(hubMap)
+          pfMap:ShowMapID(hubMap or fallbackMap)
+        end) then
+        return
+      end
+      pfMap:ShowMapID(fallbackMap)
       return
     end
     maps = pfDatabase:SearchQuestID(id, meta, maps)

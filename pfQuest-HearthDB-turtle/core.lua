@@ -1056,6 +1056,40 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
   return ticket
 end
 
+-- Resolve the quest-log Show destination without materializing every objective
+-- pin. Direct enders win over starters, matching the legacy Lua-table lookup.
+function pfQuestHearthDB:GetQuestHubMapAsync(id, callback)
+  local handle = Open()
+  id = math.floor(tonumber(id) or 0)
+  if not handle or id <= 0 then
+    if callback then callback(nil, "HearthDB is unavailable or quest id is invalid") end
+    return nil
+  end
+  local sql = [[SELECT q.phase, s.zone_id, COUNT(*)
+    FROM quest_target q
+    JOIN spawn s ON s.target_kind = q.target_kind AND s.target_id = q.target_id
+    WHERE q.quest_id = ]] .. id .. [[
+      AND q.phase IN ('start', 'end')
+      AND q.target_kind IN ('U', 'O')
+      AND s.zone_id > 0
+    GROUP BY q.phase, s.zone_id
+    ORDER BY CASE q.phase WHEN 'end' THEN 0 ELSE 1 END, COUNT(*) DESC, s.zone_id ASC]]
+  local ok, ticket = pcall(HDB_QueryRawAsync, handle, sql, function(columns, rows, err)
+    if err then
+      HDB_ClearPoison(handle)
+      if callback then callback(nil, err) end
+      return
+    end
+    local row = rows and rows[1]
+    if callback then callback(row and tonumber(row[2]) or nil, nil) end
+  end)
+  if not ok or not ticket then
+    if callback then callback(nil, "could not submit quest hub query") end
+    return nil
+  end
+  return ticket
+end
+
 -- Public provider boundary for a future vanilla pfQuest-HDB edition. It owns
 -- the asynchronous lookup and returns only map-ready records, so consumers do
 -- not need to know about SQLite rows, item source expansion, or cache keys.
