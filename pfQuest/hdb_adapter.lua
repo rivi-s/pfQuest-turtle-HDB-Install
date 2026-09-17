@@ -1197,6 +1197,16 @@ function pfDatabase:RefreshCompletedQuestGiversHDB(id, meta)
   if not Enabled() or type(pfQuestHearthDB.GetQuestStartPinsAsync) ~= "function" then return false end
   id = tonumber(id)
   if not id then return false end
+
+  -- The fast path used to add only quests directly unlocked by this turn-in.
+  -- It left the completed quest's cached start pins in place, so NPC tooltips
+  -- could keep advertising earlier chain steps until a later full refresh.
+  local completedTitle = hdbQuestGiverSet[id]
+    or (pfDB.quests.loc[id] and pfDB.quests.loc[id].T)
+  hdbQuestGiverPins[id] = nil
+  hdbQuestGiverSet[id] = nil
+  if completedTitle then pfMap:DeleteNode("PFQUEST", completedTitle) end
+
   local _, race = UnitRace("player")
   local _, class = UnitClass("player")
   local levelRange = pfQuest_config["questpinlevelrange"] or "off"
