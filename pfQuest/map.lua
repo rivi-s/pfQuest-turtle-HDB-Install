@@ -402,10 +402,10 @@ function pfMap:ShowTooltip(meta, tooltip)
           for i = 1, objectives, 1 do
             local text, type, finished = compat.GetQuestLogLeaderBoard(i, qid)
 
-            if type == "monster" then
+            if type == "monster" or meta["QTYPE"] == "UNIT_OBJECTIVE"
+                or meta["QTYPE"] == "UNIT_OBJECTIVE_ITEMREQ" then
               -- kill
-              local i, j, monsterName, objNum, objNeeded =
-                strfind(text, pfUI.api.SanitizePattern(QUEST_MONSTERS_KILLED))
+              local monsterName, objNum, objNeeded = pfUI.api.cmatch(text, QUEST_MONSTERS_KILLED)
               if monsterName and ObjectiveNameMatches(meta["spawn"], monsterName) then
                 catch_obj = true
                 local r, g, b = pfMap.tooltip:GetColor(objNum, objNeeded)
@@ -414,8 +414,7 @@ function pfMap:ShowTooltip(meta, tooltip)
             elseif meta["QTYPE"] == "OBJECT_OBJECTIVE" and (type == "object" or type == "item") then
               -- Direct object objectives use the same localized progress
               -- format as item objectives, but have no drop-rate item entry.
-              local _, _, objectName, objNum, objNeeded =
-                strfind(text, pfUI.api.SanitizePattern(QUEST_OBJECTS_FOUND))
+              local objectName, objNum, objNeeded = pfUI.api.cmatch(text, QUEST_OBJECTS_FOUND)
               if objectName and meta["spawn"] == objectName then
                 catch_obj = true
                 local r, g, b = pfMap.tooltip:GetColor(objNum, objNeeded)
@@ -423,7 +422,7 @@ function pfMap:ShowTooltip(meta, tooltip)
               end
             elseif table.getn(meta["item"]) > 0 and (type == "item" or type == "object") and meta["droprate"] then
               -- loot
-              local i, j, itemName, objNum, objNeeded = strfind(text, pfUI.api.SanitizePattern(QUEST_OBJECTS_FOUND))
+              local itemName, objNum, objNeeded = pfUI.api.cmatch(text, QUEST_OBJECTS_FOUND)
 
               for mid, item in pairs(meta["item"]) do
                 if item == itemName then
@@ -450,7 +449,7 @@ function pfMap:ShowTooltip(meta, tooltip)
               end
             elseif table.getn(meta["item"]) > 0 and type == "item" and meta["sellcount"] then
               -- vendor
-              local i, j, itemName, objNum, objNeeded = strfind(text, pfUI.api.SanitizePattern(QUEST_OBJECTS_FOUND))
+              local itemName, objNum, objNeeded = pfUI.api.cmatch(text, QUEST_OBJECTS_FOUND)
 
               for mid, item in pairs(meta["item"]) do
                 if item == itemName then
@@ -1430,6 +1429,15 @@ function pfMap:CacheCurrentExploration(mapID)
   end
 end
 
+local function RememberCurrentZoneQuest(map, title, node)
+  if tonumber(pfQuest_config["trackingmethod"]) ~= 5 or not map or not node then return end
+  local questid = tonumber(node.questid)
+  if not questid or not (pfQuest.questlog and pfQuest.questlog[questid]) then return end
+  pfMap.currentZoneTracker = pfMap.currentZoneTracker or {}
+  pfMap.currentZoneTracker[map] = pfMap.currentZoneTracker[map] or {}
+  pfMap.currentZoneTracker[map][questid] = title
+end
+
 function pfMap:UpdateNodes()
   pfQuest:Debug("Update Nodes")
 
@@ -1558,6 +1566,7 @@ function pfMap:UpdateNodes()
       local routeNode
       local routeLayer = 0
       for title, meta in pairs(node) do
+        RememberCurrentZoneQuest(map, title, meta)
         pfQuest.tracker.ButtonAdd(title, meta)
         pfQuest.tracker.RegisterQuestPoint(title, meta, x, y)
 
@@ -1609,7 +1618,9 @@ function pfMap:UpdateNodes()
     if pfQuest.tracker and pfQuest.tracker.DoLayout then
       pfQuest.tracker.DoLayout()
     end
-    if rebuildRoute then pfMap.dirtyMaps[map] = nil end
+    -- This hidden pass updates the tracker, minimap inputs, and route only.
+    -- It does not rebuild the existing World Map pin frames, so keep the map
+    -- dirty until a visible UpdateNodes pass consumes the changed node set.
     return
   end
 
@@ -1716,6 +1727,7 @@ function pfMap:UpdateNodes()
         -- display preference. Hidden objective spawns are still active quests
         -- and must remain visible in Current Zone Only mode.
         for title, node in pairs(pfMap.pins[i].node) do
+          RememberCurrentZoneQuest(map, title, node)
           pfQuest.tracker.ButtonAdd(title, node)
           pfQuest.tracker.RegisterQuestPoint(title, node, x, y)
         end

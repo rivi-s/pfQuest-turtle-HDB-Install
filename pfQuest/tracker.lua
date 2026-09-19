@@ -31,6 +31,14 @@ local function ReadQuestLogVisibility()
   return hasCollapsed and visible or nil, table.concat(signature, "\n")
 end
 
+local function IsQuestTrackerEntryVisible(title, questid, visibleQuests, completedActive)
+  if not visibleQuests or visibleQuests[title] then return true end
+  -- Opening the Quest Log can transiently omit completed rows from its visible
+  -- list even though they remain active. Completion is authoritative until
+  -- turn-in, so a collapsed-header snapshot must not evict those entries.
+  return type(questid) == "number" and completedActive and completedActive[questid]
+end
+
 local function HideTooltip()
   GameTooltip:Hide()
 end
@@ -306,6 +314,7 @@ end)
 
 tracker.buttons = {}
 tracker.buttonByTitle = {} -- reverse map: title → button index, for O(1) duplicate detection
+tracker.completedActive = {} -- completion confirmed while the quest remains active
 tracker.mode = "QUEST_TRACKING"
 
 tracker.backdrop = CreateFrame("Frame", nil, tracker)
@@ -610,7 +619,11 @@ function tracker.ButtonEvent(self)
     -- reports its final state. Refresh the completion icon from the current
     -- quest log on every event; objective-free talk/report quests are ready
     -- by the same rule used by pfQuest's map tooltip and objective state.
-    if complete or objectives == 0 then
+    if (complete or objectives == 0) and type(qid) == "number" then
+      tracker.completedActive[qid] = true
+    end
+    local ready = complete or objectives == 0 or tracker.completedActive[qid]
+    if ready then
       self.icon:SetTexture(pfQuestConfig.path .. "\\img\\complete_c")
       self.icon:SetVertexColor(1, 1, 1, 1)
     end
@@ -730,7 +743,8 @@ function tracker.ButtonEvent(self)
   -- Mark for sort instead of sorting immediately (deferred)
   tracker.needsSort = true
   tracker:ScheduleLayout()
-  if tracker.mode == "QUEST_TRACKING" and tracker.visibleQuests and not tracker.visibleQuests[title] then
+  if tracker.mode == "QUEST_TRACKING"
+      and not IsQuestTrackerEntryVisible(title, self.questid, tracker.visibleQuests, tracker.completedActive) then
     self:Hide()
   else
     self:Show()
@@ -757,6 +771,8 @@ function tracker.DoLayout()
     end
   end
 
+  -- Match the Quest Log's explicit header-collapse state. Current Zone Only
+  -- retention is handled in Reset() instead of disabling collapsed tabs.
   local visibleQuests = tracker.mode == "QUEST_TRACKING" and ReadQuestLogVisibility() or nil
   tracker.visibleQuests = visibleQuests
 
@@ -769,7 +785,8 @@ function tracker.DoLayout()
     button:ClearAllPoints()
     button:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", 0, -height)
     button:SetPoint("TOPLEFT", tracker, "TOPLEFT", 0, -height)
-    if not button.empty and (not visibleQuests or visibleQuests[button.title]) then
+    if not button.empty
+        and IsQuestTrackerEntryVisible(button.title, button.questid, visibleQuests, tracker.completedActive) then
       button:Show()
       height = height + button:GetHeight()
 
@@ -930,6 +947,36 @@ end
 function tracker.Reset()
   tracker:SetHeight(panelheight)
   tracker.questPoints = {}
+  -- Completion may be reported only while a quest is selected on some Turtle
+  -- clients. Keep confirmed state for active quests, and discard it as soon as
+  -- the quest actually leaves pfQuest's log.
+  for questid in pairs(tracker.completedActive) do
+    if not pfQuest.questlog[questid] then tracker.completedActive[questid] = nil end
+  end
+
+  local trackingmethod = tonumber(pfQuest_config["trackingmethod"])
+  local currentMap = trackingmethod == 5 and pfMap and pfMap.GetPlayerMapID
+      and pfMap:GetPlayerMapID()
+    or nil
+
+  -- Current Zone Only is rebuilt whenever the selected Quest Log row changes.
+  -- Preserve completed quests that were already present in this zone before
+  -- clearing the buttons; their objective pins legitimately disappear at
+  -- completion, but the tracker entry must remain until turn-in.
+  if currentMap then
+    pfMap.currentZoneTracker = pfMap.currentZoneTracker or {}
+    pfMap.currentZoneTracker[currentMap] = pfMap.currentZoneTracker[currentMap] or {}
+    for _, button in pairs(tracker.buttons) do
+      local questid = button and tonumber(button.questid)
+      local alreadyInZone = questid and pfMap.currentZoneTracker[currentMap][questid]
+      local nodeInZone = button and button.node
+        and tonumber(button.node.zone) == tonumber(currentMap)
+      if questid and button.title and pfQuest.questlog[questid]
+          and tracker.completedActive[questid] and (alreadyInZone or nodeInZone) then
+        pfMap.currentZoneTracker[currentMap][questid] = button.title
+      end
+    end
+  end
   for id, button in pairs(tracker.buttons) do
     button.level = nil
     button.title = nil
@@ -952,18 +999,38 @@ function tracker.Reset()
     local title, level, tag, header, collapsed, complete = compat.GetQuestLogTitle(qlogid)
     if title and not header then
       local watched = IsQuestWatched(qlogid)
+      local questid
+      for activeID, data in pairs(pfQuest.questlog or {}) do
+        if data and data.qlogid == qlogid then
+          questid = activeID
+          break
+        end
+      end
+      if complete and type(questid) == "number" then tracker.completedActive[questid] = true end
+      local knownComplete = complete or (questid and tracker.completedActive[questid])
       -- "All Quests" must not depend on the client marking a quest as watched.
       -- Turtle leaves some normal item/object quests (for example Hilary's
       -- Necklace) unwatched, which previously made them disappear after the
       -- tracker reset even though they were active in the quest log.
-      local trackingmethod = tonumber(pfQuest_config["trackingmethod"])
-      if trackingmethod ~= 5 and (watched or trackingmethod == 1) then
+      -- Turtle can clear a completed quest's watched flag when the Quest Log
+      -- opens or another row is selected. Completion is authoritative active
+      -- state, so retain that quest in the tracker across the rebuild.
+      local retainedInCurrentZone = currentMap and questid
+        and pfMap.currentZoneTracker[currentMap]
+        and pfMap.currentZoneTracker[currentMap][questid]
+      if (trackingmethod ~= 5 and (watched or trackingmethod == 1 or knownComplete))
+          or retainedInCurrentZone then
         -- Objective rows can briefly be absent while the client reindexes the
         -- quest log after a turn-in. Use the authoritative completion flag.
-        local img = complete
+        local img = knownComplete
           and pfQuestConfig.path .. "\\img\\complete_c"
           or pfQuestConfig.path .. "\\img\\complete"
-        pfQuest.tracker.ButtonAdd(title, { dummy = true, addon = "PFQUEST", texture = img })
+        pfQuest.tracker.ButtonAdd(title, {
+          dummy = true,
+          addon = "PFQUEST",
+          questid = questid,
+          texture = img,
+        })
       end
 
       found = found + 1

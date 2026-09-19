@@ -654,7 +654,7 @@ function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
     local text, kind, done = compat.GetQuestLogLeaderBoard(index, qlogid)
     if not done then allDone = false end
     if kind == "monster" then
-      local _, _, name, current, needed = strfind(text, pfUI.api.SanitizePattern(QUEST_MONSTERS_KILLED))
+      local name, current, needed = pfUI.api.cmatch(text, QUEST_MONSTERS_KILLED)
       local state = ((current and needed and current + 0 >= needed + 0) or done) and "DONE" or "PROG"
       if name then
         local matched
@@ -673,7 +673,7 @@ function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
         end
       end
     elseif kind == "item" then
-      local _, _, name, current, needed = strfind(text, pfUI.api.SanitizePattern(QUEST_OBJECTS_FOUND))
+      local name, current, needed = pfUI.api.cmatch(text, QUEST_OBJECTS_FOUND)
       if name then
         local matched
         local itemIDs = {}
@@ -1695,7 +1695,7 @@ function pfDatabase:SearchQuestID(id, meta, maps)
 
         -- spawn data
         if type == "monster" then
-          local i, j, monsterName, objNum, objNeeded = strfind(text, pfUI.api.SanitizePattern(QUEST_MONSTERS_KILLED))
+          local monsterName, objNum, objNeeded = pfUI.api.cmatch(text, QUEST_MONSTERS_KILLED)
           for id in pairs(pfDatabase:GetIDByName(monsterName, "units")) do
             parse_obj["U"][id] = (objNum + 0 >= objNeeded + 0 or done) and "DONE" or "PROG"
           end
@@ -1707,7 +1707,7 @@ function pfDatabase:SearchQuestID(id, meta, maps)
 
         -- item data
         if type == "item" then
-          local i, j, itemName, objNum, objNeeded = strfind(text, pfUI.api.SanitizePattern(QUEST_OBJECTS_FOUND))
+          local itemName, objNum, objNeeded = pfUI.api.cmatch(text, QUEST_OBJECTS_FOUND)
           for id in pairs(pfDatabase:GetIDByName(itemName, "items")) do
             parse_obj["I"][id] = (objNum + 0 >= objNeeded + 0 or done) and "DONE" or "PROG"
           end

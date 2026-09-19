@@ -516,6 +516,11 @@ questLogFrame:SetScript("OnEvent", function()
 
     if event == "QUEST_DETAIL" then
         EndInteraction()
+        -- Accepting a follow-up is a new dialog even when an object-driven
+        -- chain emits neither QUEST_GREETING nor GOSSIP_SHOW. Clear the prior
+        -- reward guard here so a later direct QUEST_COMPLETE is not mistaken
+        -- for a duplicate from the preceding quest (for example quest 285).
+        rewardedCurrentDialog = false
         if not IsTrivialQuest() then
             AcceptQuest()
         end

@@ -1350,9 +1350,27 @@ QuestLog_Update = function()
     -- button refresh read-only so resolving an ambiguous quest cannot select a
     -- hidden row and expand its collapsed category.
     local preserveSelection = QuestLogFrame and QuestLogFrame:IsShown()
-    local questids = pfDatabase:GetQuestIDs(compat.GetQuestLogSelection(), preserveSelection)
-    if questids and questids[1] and tonumber(questids[1]) and pfQuest.questlog[questids[1]] then
-      pfQuest.buttonOnline:SetID(questids[1])
+    local selectedQlogID = compat.GetQuestLogSelection()
+    local questids = pfDatabase:GetQuestIDs(selectedQlogID, preserveSelection)
+    local resolvedQuestID = questids and tonumber(questids[1])
+    local selectedQuestIsActive
+    if resolvedQuestID then
+      local resolvedState = pfQuest.questlog and pfQuest.questlog[resolvedQuestID]
+      selectedQuestIsActive = resolvedState and resolvedState.qlogid == selectedQlogID
+      if not selectedQuestIsActive then
+        -- Duplicate-title HDB resolution is asynchronous. The selected row can
+        -- resolve one refresh before UpdateQuestlog rekeys its title entry to
+        -- the numeric ID. The qlog index still proves this is the active row.
+        for _, state in pairs(pfQuest.questlog or {}) do
+          if state and state.qlogid == selectedQlogID then
+            selectedQuestIsActive = true
+            break
+          end
+        end
+      end
+    end
+    if resolvedQuestID and selectedQuestIsActive then
+      pfQuest.buttonOnline:SetID(resolvedQuestID)
       pfQuest.buttonOnline:Show()
       pfQuest.buttonLanguage:Show()
       -- enable buttons
@@ -1360,7 +1378,7 @@ QuestLog_Update = function()
       if pfQuest.buttonHide then pfQuest.buttonHide:Enable() end
 
       if pfQuest_config.showids == "1" then
-        pfQuest.buttonOnline.txt:SetText("|cff000000[|cffaa2222id: " .. questids[1] .. "|cff000000]")
+        pfQuest.buttonOnline.txt:SetText("|cff000000[|cffaa2222id: " .. resolvedQuestID .. "|cff000000]")
         pfQuest.buttonOnline:SetWidth(pfQuest.buttonOnline.txt:GetStringWidth())
       end
     else

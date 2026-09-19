@@ -196,6 +196,21 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
     return nil, false, false
   end
   local slotKey = tostring(qlogid) .. ":" .. tostring(title) .. ":" .. tostring(level or "")
+
+  -- A visible Quest Log refresh deliberately avoids selecting background rows.
+  -- Reuse the numeric identity already attached to this exact active row before
+  -- starting an asynchronous duplicate-title lookup with no readable text.
+  -- Matching both qlog index and title prevents an unrelated shifted row from
+  -- inheriting the old identity after quest acceptance or turn-in.
+  if preserveSelection then
+    for activeID, state in pairs(pfQuest.questlog or {}) do
+      if type(activeID) == "number" and state and state.qlogid == qlogid
+          and state.title == title then
+        return activeID, false, true
+      end
+    end
+  end
+
   if questIdentityFailed[slotKey] then return nil, false, true end
   if questIdentityPending[slotKey] then return nil, true, true end
   local candidates, titleIndexReady = pfQuestHearthDB:GetCachedQuestIDsByTitle(title)
@@ -303,15 +318,12 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
 
     if table.getn(remaining) == 1 and remaining[1].id then
       questIdentityCache[observationKey] = remaining[1].id
-    elseif liveObjective ~= "" or liveDescription ~= "" or next(liveTargets) then
-      -- Only lock this observation in as unresolved when it actually had some
-      -- text or objective signal to discriminate on. A background scan that
-      -- deliberately skipped reading an unselected quest-log row's text (see
-      -- CaptureQuestIdentityText's preserveSelection branch) captures nothing
-      -- at all here, and caching that as a permanent negative result would
-      -- keep this quest unresolved for the rest of the session even after
-      -- real text becomes available -- for example, until the player selects
-      -- it in the Quest Log or runs a command that forces a real read.
+    elseif liveObjective ~= "" or liveDescription ~= ""
+        or (resolutionClass ~= "TEXT_UNIQUE" and next(liveTargets)) then
+      -- Only lock this observation in as unresolved when it carried a signal
+      -- that this resolution class can actually consume. TEXT_UNIQUE requires
+      -- quest text; an unselected read-only background scan has only targets,
+      -- so caching that pass would poison the row until the next reload.
       questIdentityUnresolved[observationKey] = true
     end
     RefreshQuestIdentityUI()
@@ -347,8 +359,21 @@ function pfDatabase:ShowExtendedTooltipHDB(id, tooltip, parent, anchor, offx, of
         table.insert(sources[pin.phase], pin.title)
       end
     end
-    if table.getn(sources.start) > 0 then tooltip:AddDoubleLine(pfQuest_Loc["Quest Start"] .. ":", table.concat(sources.start, ", "), 1, 1, 1, 1, 1, 0.8) end
-    if table.getn(sources["end"]) > 0 then tooltip:AddDoubleLine(pfQuest_Loc["Quest End"] .. ":", table.concat(sources["end"], ", "), 1, 1, 1, 1, 1, 0.8) end
+    -- GameTooltip doesn't wrap AddDoubleLine text, so an unbounded name list
+    -- (a widely-shared quest giver/turn-in template can have dozens of
+    -- distinct titles) renders as one line wider than the screen. Cap what's
+    -- actually listed; the tooltip's job is identifying a few names, not
+    -- enumerating every possible source.
+    local SOURCE_LIST_CAP = 8
+    local function FormatSourceList(list)
+      local count = table.getn(list)
+      if count <= SOURCE_LIST_CAP then return table.concat(list, ", ") end
+      local shown = {}
+      for i = 1, SOURCE_LIST_CAP do shown[i] = list[i] end
+      return table.concat(shown, ", ") .. " (+" .. (count - SOURCE_LIST_CAP) .. " more)"
+    end
+    if table.getn(sources.start) > 0 then tooltip:AddDoubleLine(pfQuest_Loc["Quest Start"] .. ":", FormatSourceList(sources.start), 1, 1, 1, 1, 1, 0.8) end
+    if table.getn(sources["end"]) > 0 then tooltip:AddDoubleLine(pfQuest_Loc["Quest End"] .. ":", FormatSourceList(sources["end"]), 1, 1, 1, 1, 1, 0.8) end
     if record.objective and record.objective ~= "" then tooltip:AddLine(" "); tooltip:AddLine(pfDatabase:FormatQuestText(record.objective), 1, 1, 1, true) end
     if record.description and record.description ~= "" then
       local text = pfDatabase:FormatQuestText(record.description)
@@ -733,12 +758,13 @@ function pfDatabase:GetQuestObjectiveHDB(id)
   return record and record.objective or nil
 end
 
--- Shadow-only comparison for the first direct-rendering migration. It compares
--- source identities rather than pins, because normal pfQuest clusters multiple
--- spawn coordinates into one node.
--- Consumer boundary for the future HDB map renderer. It consumes the cached
--- record only; it never opens SQLite or re-runs a Lua database search. This is
--- deliberately not wired into the normal rendering path yet.
+-- Consumer boundary for the HDB map renderer. It consumes the cached record
+-- only; it never opens SQLite or re-runs a Lua database search. `replace`
+-- must be true on every live call: it clears this quest's existing PFQUEST
+-- pins before re-adding only the ones still eligible, which is what actually
+-- removes a pin once its objective's `states` entry flips to DONE. Skipping
+-- the clear only stops new pins being added for a finished objective; it
+-- leaves the stale one already on the map in place indefinitely.
 function pfDatabase:RenderQuestHDBCache(id, qlogid, replace)
   local record = GetActiveQuestCache()[id]
   if not record or record.qlogid ~= qlogid or not IsCurrentQuest(id, qlogid) then
@@ -987,7 +1013,7 @@ function pfDatabase:SearchQuestIDHDB(id, meta)
 
   local record = GetActiveQuestCache()[id]
   if record and record.qlogid == qlogid then
-    pfDatabase:RenderQuestHDBCache(id, qlogid, false)
+    pfDatabase:RenderQuestHDBCache(id, qlogid, true)
     return true
   end
 
@@ -1002,7 +1028,7 @@ function pfDatabase:SearchQuestIDHDB(id, meta)
     end
 
     pfDatabase:StoreQuestHDBCache(id, qlogid, result)
-    pfDatabase:RenderQuestHDBCache(id, qlogid, false)
+    pfDatabase:RenderQuestHDBCache(id, qlogid, true)
     pfMap.queue_update = GetTime()
   end)
   return accepted and true or false

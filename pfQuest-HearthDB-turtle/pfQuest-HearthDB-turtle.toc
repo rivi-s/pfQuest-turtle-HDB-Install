@@ -2,7 +2,7 @@
 ## Title: pfQuest HearthDB Provider |cff00aeff[HDB]
 ## Notes: Asynchronous SQLite data provider for pfQuest HDB.
 ## Author: rivi-s
-## Version: 0.1.0-alpha.9
+## Version: 0.1.0-alpha.10
 ## OptionalDeps: pfQuest
 ## LoadOnDemand: 0
 
