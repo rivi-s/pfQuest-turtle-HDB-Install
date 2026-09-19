@@ -1,3 +1,7 @@
+-- Use the table method directly instead of relying on Blizzard's optional
+-- global alias. UI replacements such as Dragonflight Reforged can omit gfind.
+local gfind = string.gmatch or string.gfind
+
 -- Initialize pfUI core table for non-pfUI environments
 if not pfUI then
   pfUI = {
