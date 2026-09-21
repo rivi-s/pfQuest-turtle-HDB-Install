@@ -644,12 +644,26 @@ end
 function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
   local states = { U = {}, O = {}, I = {} }
   local _, _, _, _, _, complete = compat.GetQuestLogTitle(qlogid)
-  if complete then return states, true end
-
   local objectives = GetNumQuestLeaderBoards(qlogid) or 0
-  -- Match normal SearchQuestID: some 1.12 clients remove completed rows,
-  -- leaving zero leaderboards when a quest is ready to hand in.
-  local allDone = objectives == 0 or objectives > 0
+  local knownObjectiveFree = identity and identity.hasObjectives == false or false
+  local quest = identity and identity.id and pfDB["quests"]["data"][identity.id]
+  if quest and identity.hasObjectives == nil then
+    knownObjectiveFree = true
+    for _, entries in pairs(quest["obj"] or {}) do
+      if type(entries) == "table" and next(entries) then
+        knownObjectiveFree = false
+        break
+      end
+    end
+  end
+  if knownObjectiveFree then return states, true end
+  -- Turtle can return -1, or briefly report the row complete, while live
+  -- objectives remain unfinished. Objective rows are authoritative whenever
+  -- present. Only objective-free talk/report quests use the row flag.
+  if objectives == 0 then
+    return states, complete == 1 or complete == true
+  end
+  local allDone = true
   for index = 1, objectives do
     local text, kind, done = compat.GetQuestLogLeaderBoard(index, qlogid)
     if not done then allDone = false end

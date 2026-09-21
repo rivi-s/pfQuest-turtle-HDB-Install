@@ -1118,10 +1118,11 @@ function pfQuestHearthDB:GetQuestMapPinsAsync(id, callback, limit)
       end
       local result = {
         id = id, title = quest.title, objective = quest.objective, description = quest.description,
-        level = quest.level, minLevel = quest.minLevel, pins = {},
+        level = quest.level, minLevel = quest.minLevel, pins = {}, hasObjectives = false,
       }
       for index = 1, table.getn(records or {}) do
         local row = records[index]
+        if row.phase == "obj" then result.hasObjectives = true end
         if row.zoneID and row.x and row.y then
           table.insert(result.pins, {
             phase = row.phase,

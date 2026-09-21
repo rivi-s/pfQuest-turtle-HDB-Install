@@ -702,6 +702,7 @@ function pfDatabase:StoreQuestHDBCache(id, qlogid, result)
     objective = result.objective,
     description = result.description,
     level = result.level,
+    hasObjectives = result.hasObjectives,
     pins = result.pins or {},
     targets = targets,
     spawns = spawns,
@@ -709,6 +710,12 @@ function pfDatabase:StoreQuestHDBCache(id, qlogid, result)
   }
   GetActiveQuestCache()[id] = record
   pfDatabase:RefreshQuestHDBState(id, qlogid)
+  if pfQuest.tracker and pfQuest.tracker.buttons then
+    for _, button in pairs(pfQuest.tracker.buttons) do
+      if button and button.title == record.title then pfQuest.tracker.ButtonEvent(button) end
+    end
+  end
+  pfMap.queue_update = GetTime()
   return record
 end
 
