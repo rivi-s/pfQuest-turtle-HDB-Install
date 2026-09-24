@@ -28,7 +28,7 @@ gathering routes have all been adapted to that model.
 - English (`enUS`) data and matching only
 - Vanilla content database
 - HearthDB required
-- Version `0.1.0-alpha.10`
+- Version `0.1.0-alpha.11`
 
 Other locales can use the same provider interface and database schema, but their
 database packages are planned for a later testing round.

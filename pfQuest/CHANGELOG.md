@@ -1,5 +1,18 @@
 # pfQuest base patch notes
 
+## 0.1.0-alpha.11 — 2026-09-24
+
+- Fixed false tracker completion icons while preserving correct readiness for simple talk and hand-in quests.
+- Restored route arrows for objective-free hand-ins after asynchronous HearthDB data loads.
+- Kept completed quests stable in the Current Zone tracker while opening the Quest Log or selecting another quest.
+- Refreshed stale quest markers and objectives without requiring tooltip hover or reload.
+- Fixed map objective progress counts and compatibility with UI replacements that do not expose the optional `gfind` global.
+- Added Turtle boundary-alias filtering support to the shared zone-map renderer.
+
+## 8.0.31 — 2026-09-19
+
+- Capped the quest-start/quest-end name list in the HDB extended tooltip so a widely shared quest-giver template no longer renders one line wider than the screen.
+
 ## 8.0.30 — 2026-09-13
 
 - Kept collapsed Quest Log categories closed when completing quests.

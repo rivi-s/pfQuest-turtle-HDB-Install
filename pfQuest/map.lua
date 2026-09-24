@@ -1495,6 +1495,21 @@ function pfMap:UpdateNodes()
     return
   end
 
+  local boundaryAliases = tonumber(pfQuest_config["trackingmethod"]) == 5
+    and pfMap.BuildBoundaryAliasKeys and pfMap:BuildBoundaryAliasKeys(map) or nil
+  local function FilterBoundaryAliases(nodes)
+    if not boundaryAliases or not next(boundaryAliases) or not pfMap.IsBoundaryAliasNode then
+      return nodes or {}
+    end
+    local filtered = {}
+    for coords, node in pairs(nodes or {}) do
+      if not pfMap:IsBoundaryAliasNode(node, boundaryAliases) then
+        filtered[coords] = node
+      end
+    end
+    return filtered
+  end
+
   local exploredBounds, explorationHandled = GetExploredBounds(map)
   if cityMaps[map] then
     if pfMap:IsMapVisited(map) then
@@ -1554,7 +1569,7 @@ function pfMap:UpdateNodes()
     local playerX, playerY = GetPlayerMapPosition("player")
     playerX, playerY = (playerX or 0) * 100, (playerY or 0) * 100
     local rawObjectiveCandidates = {}
-    for coords, node in pairs(questNodes or {}) do
+    for coords, node in pairs(FilterBoundaryAliases(questNodes)) do
       local x, y
       if coord_cache[coords] then
         x, y = coord_cache[coords][1], coord_cache[coords][2]
@@ -1658,7 +1673,7 @@ function pfMap:UpdateNodes()
   end
   for addon, _ in pairs(pfMap.nodes) do
     if pfMap.nodes[addon][map] then
-      for coords, node in pairs(pfMap.nodes[addon][map]) do
+      for coords, node in pairs(FilterBoundaryAliases(pfMap.nodes[addon][map])) do
         if not pfMap.pins[i] then
           pfMap.pins[i] = pfMap:BuildNode("pfMapPin" .. i, WorldMapButton)
         end

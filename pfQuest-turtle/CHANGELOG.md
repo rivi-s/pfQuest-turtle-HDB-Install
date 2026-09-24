@@ -1,5 +1,14 @@
 # pfQuest Turtle patch notes
 
+## 0.1.0-alpha.11 — 2026-09-24
+
+- Restored quest nameplate icons automatically after login and reload.
+- Added calibrated continent projections for Balor, Grim Reaches, Northwind, and Gilneas.
+- Fixed Current Zone Only leaking quests from older maps into newer Turtle zones.
+- Removed duplicate Alah'Thalas and Thalassian Highlands continent quest pins.
+- Added verified Northwind, Balor, and Moonwhisper Coast quest relationships, objective sources, object and NPC locations, and corrected drop rates.
+- Rebuilt and validated the packaged Turtle HearthDB database.
+
 ## 1.0.20 — 2026-09-13
 
 - Kept collapsed Quest Log categories closed when accepting quests while nameplate objectives are enabled.
