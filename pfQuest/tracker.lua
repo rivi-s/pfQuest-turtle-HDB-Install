@@ -53,25 +53,43 @@ end
 
 -- Some clients omit collapsed quests from the list; others still return them.
 -- Support both layouts without removing anything from pfQuest's quest cache.
+local questHeaderByTitle = {}
+
 local function ReadQuestLogVisibility()
-  local visible, signature = {}, {}
+  local visible, explicitlyHidden, signature = {}, {}, {}
+  local currentHeader
   local hidden, hasCollapsed = false, false
   for i = 1, GetNumQuestLogEntries() do
     local title, _, _, header, collapsed = compat.GetQuestLogTitle(i)
     if title then
       if header then
+        currentHeader = title
         hidden = collapsed == true or collapsed == 1
         if hidden then hasCollapsed = true end
-      elseif not hidden then
-        visible[title] = true
+      else
+        if currentHeader then questHeaderByTitle[title] = currentHeader end
+        if hidden then explicitlyHidden[title] = true else visible[title] = true end
       end
       table.insert(signature, title .. ":" .. tostring(header) .. ":" .. tostring(collapsed))
     end
   end
-  return hasCollapsed and visible or nil, table.concat(signature, "\n")
+  if hasCollapsed then
+    local collapsedHeaders = {}
+    for i = 1, GetNumQuestLogEntries() do
+      local title, _, _, header, collapsed = compat.GetQuestLogTitle(i)
+      if title and header and (collapsed == true or collapsed == 1) then
+        collapsedHeaders[title] = true
+      end
+    end
+    for title, header in pairs(questHeaderByTitle) do
+      if collapsedHeaders[header] then explicitlyHidden[title] = true end
+    end
+  end
+  return hasCollapsed and visible or nil, table.concat(signature, "\n"), explicitlyHidden
 end
 
-local function IsQuestTrackerEntryVisible(title, questid, visibleQuests, completedActive)
+local function IsQuestTrackerEntryVisible(title, questid, visibleQuests, completedActive, explicitlyHidden)
+  if explicitlyHidden and explicitlyHidden[title] then return false end
   if not visibleQuests or visibleQuests[title] then return true end
   -- Opening the Quest Log can transiently omit completed rows from its visible
   -- list even though they remain active. Completion is authoritative until
@@ -843,7 +861,11 @@ function tracker.DoLayout()
 
   -- Match the Quest Log's explicit header-collapse state. Current Zone Only
   -- retention is handled in Reset() instead of disabling collapsed tabs.
-  local visibleQuests = tracker.mode == "QUEST_TRACKING" and ReadQuestLogVisibility() or nil
+  local visibleQuests, explicitlyHidden
+  if tracker.mode == "QUEST_TRACKING" then
+    local signature
+    visibleQuests, signature, explicitlyHidden = ReadQuestLogVisibility()
+  end
   tracker.visibleQuests = visibleQuests
 
   -- resize window and align buttons
@@ -856,7 +878,7 @@ function tracker.DoLayout()
     button:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", 0, -height)
     button:SetPoint("TOPLEFT", tracker, "TOPLEFT", 0, -height)
     if not button.empty
-        and IsQuestTrackerEntryVisible(button.title, button.questid, visibleQuests, tracker.completedActive) then
+        and IsQuestTrackerEntryVisible(button.title, button.questid, visibleQuests, tracker.completedActive, explicitlyHidden) then
       button:Show()
       height = height + button:GetHeight()
 

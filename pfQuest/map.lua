@@ -525,9 +525,11 @@ function pfMap:ShowTooltip(meta, tooltip)
 
       if not catchFallback and meta["texture"] and meta["qlvl"] then
         local texts = meta["questid"] and pfDB["quests"]["loc"][meta["questid"]] or nil
+        local objective = meta["questObjective"]
+        if (not objective or objective == "") and texts then objective = texts["O"] end
 
-        if texts and texts["O"] and texts["O"] ~= "" then
-          tooltip:AddLine(pfDatabase:FormatQuestText(texts["O"]), 1, 1, 0.9, true)
+        if objective and objective ~= "" then
+          tooltip:AddLine(pfDatabase:FormatQuestText(objective), 1, 1, 0.9, true)
         end
 
         local qlvlstr = pfQuest_Loc["Level"] .. ": " .. pfMap:HexDifficultyColor(meta["qlvl"]) .. meta["qlvl"] .. "|r"
@@ -1023,6 +1025,18 @@ function pfMap:NodeClick()
   else
     -- switch color
     pfQuest_colors[this.color] = { str2rgb(this.color .. GetTime()) }
+    -- Color keys are shared by every node for the quest (or spawn, when
+    -- spawn-color mode is enabled). A color change does not mutate any node
+    -- table, so invalidate all render tables and let each visible pin re-read
+    -- the shared saved color.
+    for _, addonData in pairs(pfMap.nodes or {}) do
+      for _, zoneNodes in pairs(addonData) do
+        for _, node in pairs(zoneNodes) do
+          pfMap.dirtyNodes[node] = true
+          pfMap.dirtyMinimapNodes[node] = true
+        end
+      end
+    end
     pfMap.queue_update = GetTime()
   end
 end

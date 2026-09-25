@@ -199,3 +199,106 @@ SlashCmdList["HDBROUTE"] = function()
     .. " lastDrawNode=" .. tostring(route.lastDrawNode)
     .. " coord1dist=" .. tostring(first and first[4]))
 end
+
+-- Temporary tester coordinate logger. Stand on a spawn and use `/hdbloc`.
+-- Points survive `/reload` and samples within 0.2 map coordinates are ignored.
+HDBLocationLog = HDBLocationLog or {
+  targetID = 62194,
+  targetName = "Renegade Air Elemental",
+  points = {
+    { x = 34.4, y = 18.4, map = 406 },
+    { x = 34.8, y = 17.0, map = 406 },
+  },
+}
+
+local function LocationPointIsDuplicate(x, y, map)
+  for _, point in pairs(HDBLocationLog.points or {}) do
+    local dx = (point.x or 0) - x
+    local dy = (point.y or 0) - y
+    if point.map == map and dx * dx + dy * dy <= 0.04 then return true end
+  end
+  return false
+end
+
+local function AddLocationPoint(x, y, map)
+  x = math.floor(x * 10 + 0.5) / 10
+  y = math.floor(y * 10 + 0.5) / 10
+  if LocationPointIsDuplicate(x, y, map) then
+    Status("location already recorded: " .. string.format("%.1f, %.1f", x, y))
+    return
+  end
+
+  table.insert(HDBLocationLog.points, { x = x, y = y, map = map })
+  Status("location " .. table.getn(HDBLocationLog.points) .. " added: "
+    .. string.format("%.1f, %.1f", x, y) .. " map=" .. tostring(map))
+end
+
+local function ListLocationPoints()
+  local points = HDBLocationLog.points or {}
+  Status(tostring(HDBLocationLog.targetName) .. " (N"
+    .. tostring(HDBLocationLog.targetID) .. ") points=" .. table.getn(points))
+
+  local line = ""
+  for index, point in ipairs(points) do
+    local value = string.format("%.1f,%.1f", point.x, point.y)
+    if line ~= "" then value = "; " .. value end
+    if string.len(line .. value) > 180 then
+      Status(line)
+      line = string.format("%.1f,%.1f", point.x, point.y)
+    else
+      line = line .. value
+    end
+  end
+  if line ~= "" then Status(line) end
+end
+
+SLASH_HDBLOC1 = "/hdbloc"
+SlashCmdList["HDBLOC"] = function(message)
+  message = string.lower(message or "")
+  local _, _, command, rest = string.find(message, "^(%S*)%s*(.-)$")
+
+  if command == "list" then
+    ListLocationPoints()
+    return
+  elseif command == "undo" then
+    local removed = table.remove(HDBLocationLog.points)
+    if removed then
+      Status("removed: " .. string.format("%.1f, %.1f", removed.x, removed.y))
+    else
+      Status("location list is empty")
+    end
+    return
+  elseif command == "clear" then
+    HDBLocationLog.points = {}
+    Status("location list cleared")
+    return
+  end
+
+  -- `/hdbloc add 34.4 18.4` also accepts a manually observed coordinate.
+  if command == "add" and rest ~= "" then
+    local _, _, x, y = string.find(rest, "^(%d+%.?%d*)[%s,/]+(%d+%.?%d*)$")
+    if x and y then
+      AddLocationPoint(tonumber(x), tonumber(y),
+        pfMap and pfMap.GetPlayerMapID and pfMap:GetPlayerMapID() or nil)
+      return
+    end
+  end
+
+  if command == "" or command == "add" then
+    if WorldMapFrame and WorldMapFrame:IsShown() then
+      Status("close the World Map before recording a player position")
+      return
+    end
+    SetMapToCurrentZone()
+    local x, y = GetPlayerMapPosition("player")
+    if not x or not y or (x == 0 and y == 0) then
+      Status("player position unavailable")
+      return
+    end
+    AddLocationPoint(x * 100, y * 100,
+      pfMap and pfMap.GetPlayerMapID and pfMap:GetPlayerMapID() or nil)
+    return
+  end
+
+  Status("use /hdbloc, /hdbloc list, /hdbloc undo, or /hdbloc clear")
+end

@@ -133,11 +133,13 @@ pfMap.customContinentTransforms = customContinentTransforms
 local boundaryAliasMaps = {}
 for zoneID in pairs(customContinentTransforms) do boundaryAliasMaps[zoneID] = true end
 boundaryAliasMaps[5121] = true -- Tel'Abim
+boundaryAliasMaps[405] = true -- Desolace / Stonetalon border overlap
+boundaryAliasMaps[406] = true -- Stonetalon / Desolace border overlap
 
 function pfMap:BuildBoundaryAliasKeys(map)
     local aliases = {}
     if not map or not boundaryAliasMaps[map] then return aliases end
-    local candidates = {}
+    local candidates, localAnchors = {}, {}
     local currentNodes = self.nodes.PFQUEST and self.nodes.PFQUEST[map]
     if not currentNodes then return aliases end
     for _, node in pairs(currentNodes) do
@@ -145,9 +147,14 @@ function pfMap:BuildBoundaryAliasKeys(map)
             if data.questid and data.spawnid and data.QTYPE then
                 local key = tostring(data.questid) .. ":" .. tostring(data.QTYPE) .. ":" .. tostring(data.spawnid)
                 candidates[key] = true
+                if string.find(data.QTYPE, "_START", 1, true)
+                    or string.find(data.QTYPE, "_END", 1, true) then
+                    localAnchors[key] = data.questid
+                end
             end
         end
     end
+    local duplicateKeys, sharedAnchors = {}, {}
     for _, addonData in pairs(self.nodes) do
         for otherZone, zoneNodes in pairs(addonData) do
             if otherZone ~= map then
@@ -155,12 +162,22 @@ function pfMap:BuildBoundaryAliasKeys(map)
                     for _, data in pairs(node) do
                         if data.questid and data.spawnid and data.QTYPE then
                             local key = tostring(data.questid) .. ":" .. tostring(data.QTYPE) .. ":" .. tostring(data.spawnid)
-                            if candidates[key] then aliases[key] = true end
+                            if candidates[key] then
+                                duplicateKeys[key] = data.questid
+                                if localAnchors[key] then sharedAnchors[key] = true end
+                            end
                         end
                     end
                 end
             end
         end
+    end
+    local anchoredQuests = {}
+    for key, questid in pairs(localAnchors) do
+        if not sharedAnchors[key] then anchoredQuests[questid] = true end
+    end
+    for key, questid in pairs(duplicateKeys) do
+        if not anchoredQuests[questid] then aliases[key] = true end
     end
     return aliases
 end
@@ -674,7 +691,7 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
     processedQuests.projectedMarkers = processedQuests.projectedMarkers or {}
     local currentZoneAliases = {}
     if currentZoneOnly and boundaryAliasMaps[playerMapID] then
-        local candidates = {}
+        local candidates, localAnchors = {}, {}
         local currentNodes = pfMap.nodes.PFQUEST and pfMap.nodes.PFQUEST[playerMapID]
         if currentNodes then
             for _, node in pairs(currentNodes) do
@@ -682,10 +699,15 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
                     if data.questid and data.spawnid and data.QTYPE then
                         local key = tostring(data.questid) .. ":" .. tostring(data.QTYPE) .. ":" .. tostring(data.spawnid)
                         candidates[key] = true
+                        if string.find(data.QTYPE, "_START", 1, true)
+                            or string.find(data.QTYPE, "_END", 1, true) then
+                            localAnchors[key] = data.questid
+                        end
                     end
                 end
             end
         end
+        local duplicateKeys, sharedAnchors = {}, {}
         for _, addonData in pairs(pfMap.nodes) do
             for otherZone, zoneNodes in pairs(addonData) do
                 if otherZone ~= playerMapID then
@@ -693,12 +715,22 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
                         for _, data in pairs(node) do
                             if data.questid and data.spawnid and data.QTYPE then
                                 local key = tostring(data.questid) .. ":" .. tostring(data.QTYPE) .. ":" .. tostring(data.spawnid)
-                                if candidates[key] then currentZoneAliases[key] = true end
+                                if candidates[key] then
+                                    duplicateKeys[key] = data.questid
+                                    if localAnchors[key] then sharedAnchors[key] = true end
+                                end
                             end
                         end
                     end
                 end
             end
+        end
+        local anchoredQuests = {}
+        for key, questid in pairs(localAnchors) do
+            if not sharedAnchors[key] then anchoredQuests[questid] = true end
+        end
+        for key, questid in pairs(duplicateKeys) do
+            if not anchoredQuests[questid] then currentZoneAliases[key] = true end
         end
     end
     for addon, addonData in pairs(pfMap.nodes) do
