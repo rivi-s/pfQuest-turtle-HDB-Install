@@ -115,6 +115,12 @@ local layers = {
 -- Pre-computed texture paths (avoid string concatenation in hot paths)
 local TEX_NODECUT = addon_path .. "\\img\\nodecut"
 local TEX_NODE = addon_path .. "\\img\\node"
+-- Party-quest pins have no meta.texture of their own (that is what makes them
+-- recolorable via the same click-to-recolor path as an ordinary spawn dot),
+-- but they still get a distinct base shape so they read as "party" at a
+-- glance: the existing star icon, tinted the same way TEX_NODE/TEX_NODECUT
+-- are below instead of drawn with a fixed color.
+local TEX_STAR = addon_path .. "\\img\\fav"
 
 local function GetLayerByTexture(tex)
   if layers[tex] then
@@ -304,7 +310,12 @@ pfMap.tooltip:SetScript("OnShow", function()
 
   if pfMap.tooltips[name] and pfMap.tooltips[name] then
     for title, obj in pairs(pfMap.tooltips[name]) do
-      if obj[zone] then
+      -- PFPARTY registers here too (it sets meta.spawn so its own map-pin
+      -- tooltip keeps a real name instead of "Unknown"), but it has its own
+      -- richer world-unit tooltip addition (HookGameTooltip in
+      -- pfQuest-partyprogress.lua, with per-player progress). Showing both
+      -- duplicated the "[!] QuestName" block on the same creature's tooltip.
+      if obj[zone] and obj[zone].addon ~= "PFPARTY" then
         if IsCurrentGameTooltipQuest(obj[zone]) then
           pfMap:ShowTooltip(obj[zone], GameTooltip)
         end
@@ -1012,6 +1023,7 @@ function pfMap:NodeClick()
   elseif
     this.texture
     and pfQuest.route
+    and (this.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
     and (
       (pfQuest_config["routecluster"] == "1" and this.layer >= 9)
       or (pfQuest_config["routeender"] == "1" and this.layer == 4)
@@ -1181,10 +1193,17 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
       frame.updateVertex = (frame.vertex ~= tab.vertex)
       frame.updateColor = (frame.color ~= tab.color)
       frame.updateLayer = (frame.layer ~= tab.layer)
+      -- A recycled pin frame can move from one addon's untextured node to
+      -- another's (e.g. a plain PFQUEST spawn dot to a PFPARTY star) without
+      -- updateTexture/updateColor changing, if their color keys happen to
+      -- coincide. Track the addon switch explicitly so that case still
+      -- repaints the base shape below instead of keeping the previous one.
+      frame.updateAddon = (frame.addon ~= tab.addon)
 
       -- set title and texture to the entry with highest layer
       -- and add core information
       frame.layer = tab.layer
+      frame.addon = tab.addon
       frame.spawn = tab.spawn
       frame.spawnid = tab.spawnid
       frame.spawntype = tab.spawntype
@@ -1227,7 +1246,7 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
     end
   end
 
-  if (frame.updateColor or frame.updateTexture or not frame.tex:GetTexture()) and not frame.texture then
+  if (frame.updateColor or frame.updateTexture or frame.updateAddon or not frame.tex:GetTexture()) and not frame.texture then
     local r, g, b = str2rgb(frame.color)
 
     if (frame.title and pfQuest.icons[frame.title]) or frame.icon then
@@ -1242,7 +1261,12 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
       frame.pic:Hide()
     end
 
-    if obj == "minimap" and pfQuest_config["cutoutminimap"] == "1" then
+    if frame.addon == "PFPARTY" then
+      -- The cutout styles are a ring-shape variant; there is no cutout star,
+      -- so party pins keep the same tinted star regardless of that setting.
+      frame.tex:SetTexture(TEX_STAR)
+      frame.tex:SetVertexColor(r, g, b, 1)
+    elseif obj == "minimap" and pfQuest_config["cutoutminimap"] == "1" then
       frame.tex:SetTexture(TEX_NODECUT)
       frame.tex:SetVertexColor(r, g, b, 1)
     elseif obj ~= "minimap" and pfQuest_config["cutoutworldmap"] == "1" then
@@ -1614,6 +1638,7 @@ function pfMap:UpdateNodes()
 
       local rawObjective = routeNode and routeNode.layer == 1 and not routeNode.texture
         and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
+        and (routeNode.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
       if rawObjective then
         table.insert(rawObjectiveCandidates, { x, y, routeNode, nil, true })
       end
@@ -1625,11 +1650,14 @@ function pfMap:UpdateNodes()
         -- objective nodes as the route source until the visible map builds
         -- its clusters.
         local routeEligible =
-          (pfQuest_config["routecluster"] == "1" and (routeNode.layer >= 9 or rawObjective))
-          or (pfQuest_config["routeender"] == "1" and routeNode.layer == 4)
-          or (pfQuest_config["routestarter"] == "1" and routeNode.layer == 1 and routeNode.texture)
-          or (pfQuest_config["routestarter"] == "1" and routeNode.layer == 2)
-          or routeNode.arrow == true
+          (routeNode.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
+          and (
+            (pfQuest_config["routecluster"] == "1" and (routeNode.layer >= 9 or rawObjective))
+            or (pfQuest_config["routeender"] == "1" and routeNode.layer == 4)
+            or (pfQuest_config["routestarter"] == "1" and routeNode.layer == 1 and routeNode.texture)
+            or (pfQuest_config["routestarter"] == "1" and routeNode.layer == 2)
+            or routeNode.arrow == true
+          )
         local hidden = pfQuest_config["hideunexplored"] == "1"
           and ((explorationHandled and not exploredBounds and not pfMap:IsMapVisited(map))
             or not IsExploredPosition(exploredBounds, x, y))
@@ -1643,6 +1671,36 @@ function pfMap:UpdateNodes()
         end
       end
     end
+
+    -- questNodes above is PFQUEST-only (deliberately, so PFPARTY never shows
+    -- in the tracker), so a party pin is otherwise invisible to routing for
+    -- as long as the World Map stays closed -- the common case while
+    -- actually questing. Without this, the arrow only ever reflected party
+    -- progress from the instant the map was last opened, then went stale.
+    -- Route-candidate purposes only: no tracker/ButtonAdd calls here, so
+    -- PFPARTY still never appears in the quest tracker sidebar. No layer
+    -- priority dance needed like above -- a PFPARTY node is always
+    -- untextured/layer 1 by construction, with no competing textured or
+    -- clustered entry to out-prioritize.
+    local partyNodes = pfMap.nodes.PFPARTY and pfMap.nodes.PFPARTY[map]
+    if partyNodes and pfQuest_config["showPartyQuestPinsRoutable"] ~= "0" then
+      for coords, node in pairs(FilterBoundaryAliases(partyNodes)) do
+        local x, y
+        if coord_cache[coords] then
+          x, y = coord_cache[coords][1], coord_cache[coords][2]
+        else
+          local _, _, strx, stry = strfind(coords, "(.*)|(.*)")
+          x, y = strx + 0, stry + 0
+          coord_cache[coords] = { x, y }
+        end
+        for title, meta in pairs(node) do
+          if meta.spawn and not meta.texture then
+            table.insert(rawObjectiveCandidates, { x, y, meta, nil, true })
+          end
+        end
+      end
+    end
+
     pfQuest.route:SetRawObjectiveCandidates(rawObjectiveCandidates)
     if pfQuest.tracker and pfQuest.tracker.DoLayout then
       pfQuest.tracker.DoLayout()
@@ -1737,6 +1795,7 @@ function pfMap:UpdateNodes()
           end
           local rawObjective = routeNode and routeLayer == 1 and not routeNode.texture
             and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
+            and (routeNode.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
           if updateRoute and rawObjective then
             table.insert(rawObjectiveCandidates, { x, y, routeNode, nil, true })
           end
@@ -1746,11 +1805,14 @@ function pfMap:UpdateNodes()
         -- after the final map-visibility checks below. Otherwise the route
         -- can lead to an objective that is hidden by fog or a display filter.
         local routeEligible =
-          (pfQuest_config["routecluster"] == "1" and pfMap.pins[i].layer >= 9)
-          or (pfQuest_config["routeender"] == "1" and pfMap.pins[i].layer == 4)
-          or (pfQuest_config["routestarter"] == "1" and pfMap.pins[i].layer == 1 and pfMap.pins[i].texture)
-          or (pfQuest_config["routestarter"] == "1" and pfMap.pins[i].layer == 2)
-          or pfMap.pins[i].arrow == true
+          (pfMap.pins[i].addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
+          and (
+            (pfQuest_config["routecluster"] == "1" and pfMap.pins[i].layer >= 9)
+            or (pfQuest_config["routeender"] == "1" and pfMap.pins[i].layer == 4)
+            or (pfQuest_config["routestarter"] == "1" and pfMap.pins[i].layer == 1 and pfMap.pins[i].texture)
+            or (pfQuest_config["routestarter"] == "1" and pfMap.pins[i].layer == 2)
+            or pfMap.pins[i].arrow == true
+          )
 
         -- Populate the tracker even when the matching map pin is hidden by a
         -- display preference. Hidden objective spawns are still active quests
