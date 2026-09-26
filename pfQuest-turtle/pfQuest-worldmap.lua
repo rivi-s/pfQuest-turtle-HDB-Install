@@ -133,7 +133,6 @@ pfMap.customContinentTransforms = customContinentTransforms
 local boundaryAliasMaps = {}
 for zoneID in pairs(customContinentTransforms) do boundaryAliasMaps[zoneID] = true end
 boundaryAliasMaps[5121] = true -- Tel'Abim
-boundaryAliasMaps[405] = true -- Desolace / Stonetalon border overlap
 boundaryAliasMaps[406] = true -- Stonetalon / Desolace border overlap
 
 function pfMap:BuildBoundaryAliasKeys(map)
