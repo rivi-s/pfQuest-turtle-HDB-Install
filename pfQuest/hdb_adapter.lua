@@ -1352,7 +1352,9 @@ function pfDatabase:SearchMetaRelationHDB(query, meta, callback)
       if pass and r.zoneID and r.x and r.y then
         local n={} for k,v in pairs(meta or {}) do n[k]=v end
         n.tracking=true;n.spawn=r.title or UNKNOWN;n.spawnid=r.id;n.title=n.quest or n.item or n.spawn
-        n.level = (relation == "herbs" and string.format("%s [%s]", r.value, pfQuest_Loc["Herbalism"]))
+        local skillCaption = pfDatabase.metaSkillCaptions and pfDatabase.metaSkillCaptions[relation]
+        n.level = (skillCaption and string.format("%s [%s]", r.value, skillCaption))
+          or (relation == "herbs" and string.format("%s [%s]", r.value, pfQuest_Loc["Herbalism"]))
           or (relation == "mines" and string.format("%s [%s]", r.value, pfQuest_Loc["Mining"]))
           or r.level or UNKNOWN
         n.spawntype=r.kind=="O" and pfQuest_Loc["Object"] or pfQuest_Loc["Unit"]
@@ -1360,7 +1362,7 @@ function pfDatabase:SearchMetaRelationHDB(query, meta, callback)
           n.icon = pfDatabase.iconsByID[r.kind .. r.id] or resultIcons[n.spawn] or pfDatabase.icons[n.spawn] or n.icon
         end
         if n.icon and skill then n.fade_range = 85 elseif n.icon then n.fade_range = 10 end
-        n.zone=r.zoneID;n.x=r.x;n.y=r.y;n.respawn=r.respawn and SecondsToTime(r.respawn) or nil
+        n.zone=r.zoneID;n.x=r.x;n.y=r.y;n.respawn=r.respawn and r.respawn > 0 and SecondsToTime(r.respawn) or pfQuest_Loc["N/A"]
         maps[r.zoneID]=(maps[r.zoneID] or 0)+1;pfMap:AddNode(n)
       end end
     pfMap.queue_update=GetTime();if callback then callback(maps) end
