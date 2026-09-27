@@ -4,6 +4,26 @@
 -- Quest: Vile Dwarven Pigs (41682)
 -- The gossip-driven keg objective is absent from the extracted quest row.
 local turtleQuests = pfDB["quests"] and pfDB["quests"]["data-turtle"]
+local turtleUnits = pfDB["units"] and pfDB["units"]["data-turtle"]
+
+-- Kex Blowmaster and his Horde quest chain were removed from the game.
+if turtleUnits then turtleUnits[60443] = "_" end
+
+-- Interacting with the Mysterious Glittering Object summons Kheyna
+-- Spinpistol, who completes A Letter From a Friend and offers the follow-up.
+if turtleUnits and turtleUnits[81041] then
+  turtleUnits[81041]["coords"] = { { 48.2, 23.4, 440, 300 } }
+end
+
+if turtleQuests then
+  if turtleQuests[80407] then
+    turtleQuests[80407]["obj"] = { ["O"] = { 3000246 } }
+  end
+
+  for _, questID in pairs({ 40130, 40131, 40133, 41102, 41104 }) do
+    turtleQuests[questID] = "_"
+  end
+end
 
 -- Shaman chain: Windtorn Crest Stone -> Vortalus' Edict.
 -- The extracted rows omitted the class restriction and Vortalus objective.
@@ -26,10 +46,15 @@ for _, questID in pairs({ 41976, 41977 }) do
 end
 
 -- Tauren priest quests whose extracted rows lost their class restriction.
-for _, questID in pairs({ 42058, 42060 }) do
+for _, questID in pairs({ 42054, 42055, 42056, 42057, 42058, 42059, 42060 }) do
   if turtleQuests and turtleQuests[questID] then
     turtleQuests[questID]["class"] = 16
   end
+end
+
+-- Tainted Rune is the Dwarf Warlock introduction.
+if turtleQuests and turtleQuests[42045] then
+  turtleQuests[42045]["class"] = 256
 end
 local vileDwarvenPigs = turtleQuests and turtleQuests[41682]
 if vileDwarvenPigs then
