@@ -3,7 +3,7 @@
 ## Author: Shagu
 ## Contributors: Gurky, Antealis, HumbleKagu, KasVital, Haaxor1689, IcemanHHW, fatpowaranga, Bennylavaa
 ## Notes: A TurtleWoW DB extension for pfQuest
-## Version: 0.1.0-alpha.11
+## Version: 0.1.0-alpha.12
 ## Dependencies: pfQuest
 ## SavedVariables: pfQuest_turtlecount
 
@@ -13,6 +13,7 @@ init\enUS-turtle.xml
 overwrites.lua
 
 patchtable.lua
+pfQuest-trees.lua
 
 pfquest-arrow.lua
 pfQuest-config.lua

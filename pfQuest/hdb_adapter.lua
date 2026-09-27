@@ -1345,7 +1345,8 @@ function pfDatabase:SearchMetaRelationHDB(query, meta, callback)
       if icon and r.title then resultIcons[r.title] = icon end
     end
     for i=1,table.getn(rows) do local r=rows[i]
-      local skill = relation == "herbs" or relation == "mines" or relation == "rares" or relation == "chests"
+      local skillRelations = pfDatabase.metaSkillRelations or {}
+      local skill = skillRelations[relation]
       local pass = (not skill or (not query.min or tonumber(r.value)>=tonumber(query.min)) and (not query.max or tonumber(r.value)<=tonumber(query.max)))
       if not skill then pass = string.find(r.value or "", faction) and true or false end
       if pass and r.zoneID and r.x and r.y then

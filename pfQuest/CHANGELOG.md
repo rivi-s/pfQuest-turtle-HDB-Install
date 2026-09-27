@@ -1,5 +1,13 @@
 # pfQuest base patch notes
 
+## 0.1.0-alpha.12 — 2026-09-26
+
+- Reorganized the configuration window into five tabs while preserving all existing settings and live-update behavior.
+- Fixed map-node transparency, route-arrow re-enabling, minimap-button visibility, reload prompting, and configuration-window resizing.
+- Added rendering, recoloring, tooltip, and route-arrow support for Turtle party quest map pins.
+- Kept collapsed Quest Log categories stable and improved provider-backed map objective descriptions.
+- Added generic tracking-extension hooks so Turtle gathering categories stay out of the vanilla HDB interface.
+
 ## 0.1.0-alpha.11 — 2026-09-24
 
 - Fixed false tracker completion icons while preserving correct readiness for simple talk and hand-in quests.

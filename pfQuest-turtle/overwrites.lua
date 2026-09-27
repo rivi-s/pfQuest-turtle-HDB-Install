@@ -63,10 +63,13 @@ if darkerThanIron then
 end
 
 -- Item: Head of Geshgan (41783)
--- Preserve the known-good Turtle source chance used by alpha.6.
+-- The alpha.6 value here (1.0, i.e. 1%) was itself wrong; pfQuest-turtle's
+-- 1.0.19 changelog documents the correct, verified rate as 100%. items-turtle.lua
+-- already stores 100 directly, so this override now only needs to preserve
+-- that value against a re-extraction, not reintroduce the old 1%.
 local turtleItems = pfDB["items"] and pfDB["items"]["data-turtle"]
 if turtleItems and turtleItems[41783] then
-  turtleItems[41783]["U"] = { [62217] = 1.0 }
+  turtleItems[41783]["U"] = { [62217] = 100 }
 end
 
 -- Quest interaction items whose extracted rows have no acquisition source.

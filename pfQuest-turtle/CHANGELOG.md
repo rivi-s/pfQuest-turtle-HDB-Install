@@ -1,5 +1,12 @@
 # pfQuest Turtle patch notes
 
+## 0.1.0-alpha.12 — 2026-09-26
+
+- Added Turtle-only Trees & Wood tracking backed by HearthDB, with 36 Survival gathering-object relations and automatic skill filtering.
+- Integrated all Turtle settings into the new five-tab configuration window and defaulted new characters to the largest usable size.
+- Added party quest map pins with recoloring and optional route-arrow navigation.
+- Improved Current Zone Only behavior around custom-zone boundaries and corrected newer Turtle quest, NPC, objective, spawn, restriction, and drop-rate data.
+
 ## 0.1.0-alpha.11 — 2026-09-24
 
 - Restored quest nameplate icons automatically after login and reload.

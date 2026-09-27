@@ -1164,6 +1164,12 @@ local function ExtendPfQuestConfig()
     end
 
     table.insert(pfQuest_defconfig, {
+        text = "Party Quest Sharing",
+        type = "header",
+        page = "features"
+    })
+
+    table.insert(pfQuest_defconfig, {
         text = "Show Party Quest Progress on Tooltips",
         default = "1",
         type = "checkbox",
