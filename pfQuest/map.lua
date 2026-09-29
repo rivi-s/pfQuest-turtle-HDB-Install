@@ -286,6 +286,26 @@ local function IsCurrentGameTooltipQuest(meta)
   return not (pfQuest_history and pfQuest_history[questid])
 end
 
+-- Same-title quest chains can share an NPC, coordinate, and icon. AddNode
+-- keeps those colliding IDs as variants under one rendered node; consumers
+-- must use the variant that is actually active instead of whichever chain
+-- step happened to create the node first.
+function pfMap:GetActiveQuestVariant(meta)
+  if not meta then return meta end
+  local questlog = (pfQuest and pfQuest.questlog) or {}
+  local questid = tonumber(meta.questid)
+  if questid and (questlog[questid] or questlog[tostring(questid)]) then
+    return meta
+  end
+  for variantID, variant in pairs(meta.questVariants or {}) do
+    local id = tonumber(variant.questid) or tonumber(variantID)
+    if id and (questlog[id] or questlog[tostring(id)]) then
+      return variant
+    end
+  end
+  return meta
+end
+
 pfMap.tooltip:SetScript("OnShow", function()
   local focus = GetMouseFocus()
   -- abort on pfQuest nodes
@@ -1181,6 +1201,7 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
   frame.layer = 0
 
   for title, tab in pairs(node) do
+    tab = pfMap:GetActiveQuestVariant(tab)
     pfMap.highlightdb[frame][title] = true
 
     tab.layer = GetLayerByTexture(tab.texture)
@@ -1621,6 +1642,7 @@ function pfMap:UpdateNodes()
       local routeNode
       local routeLayer = 0
       for title, meta in pairs(node) do
+        meta = pfMap:GetActiveQuestVariant(meta)
         RememberCurrentZoneQuest(map, title, meta)
         pfQuest.tracker.ButtonAdd(title, meta)
         pfQuest.tracker.RegisterQuestPoint(title, meta, x, y)
@@ -1636,15 +1658,20 @@ function pfMap:UpdateNodes()
           routeNode.title = title
           routeLayer = meta.layer
         end
+
+        -- A coordinate can contain both an active objective and a textured
+        -- starter/ender from another quest. The texture wins the visible pin,
+        -- but the underlying objective must remain available to routing.
+        if meta.spawn and not meta.texture
+          and meta.QTYPE and string.find(meta.QTYPE, "OBJECTIVE", 1, true)
+          and (meta.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0") then
+          table.insert(rawObjectiveCandidates, { x, y, meta, nil, true })
+        end
       end
 
       local rawObjective = routeNode and routeNode.layer == 1 and not routeNode.texture
         and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
         and (routeNode.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
-      if rawObjective then
-        table.insert(rawObjectiveCandidates, { x, y, routeNode, nil, true })
-      end
-
       if rebuildRoute and routeNode then
         -- The hidden World Map path deliberately skips cluster-frame work.
         -- Item-loot and kill objectives therefore remain ordinary spawn nodes
@@ -1785,6 +1812,7 @@ function pfMap:UpdateNodes()
           local routeNode
           local routeLayer = 0
           for title, meta in pairs(node) do
+            meta = pfMap:GetActiveQuestVariant(meta)
             local layer = GetLayerByTexture(meta.texture)
             if meta.cluster and meta.priority then
               layer = layer + (10 - min(meta.priority, 10))
@@ -1794,13 +1822,18 @@ function pfMap:UpdateNodes()
               routeNode.title = title
               routeLayer = layer
             end
+
+            -- Preserve active objectives hidden beneath a higher-priority
+            -- textured marker at the same coordinates.
+            if updateRoute and meta.spawn and not meta.texture
+              and meta.QTYPE and string.find(meta.QTYPE, "OBJECTIVE", 1, true)
+              and (meta.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0") then
+              table.insert(rawObjectiveCandidates, { x, y, meta, nil, true })
+            end
           end
           local rawObjective = routeNode and routeLayer == 1 and not routeNode.texture
             and routeNode.QTYPE and string.find(routeNode.QTYPE, "OBJECTIVE", 1, true)
             and (routeNode.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
-          if updateRoute and rawObjective then
-            table.insert(rawObjectiveCandidates, { x, y, routeNode, nil, true })
-          end
         end
 
         -- Route eligibility is determined here, but the point is only added
@@ -1820,6 +1853,7 @@ function pfMap:UpdateNodes()
         -- display preference. Hidden objective spawns are still active quests
         -- and must remain visible in Current Zone Only mode.
         for title, node in pairs(pfMap.pins[i].node) do
+          node = pfMap:GetActiveQuestVariant(node)
           RememberCurrentZoneQuest(map, title, node)
           pfQuest.tracker.ButtonAdd(title, node)
           pfQuest.tracker.RegisterQuestPoint(title, node, x, y)

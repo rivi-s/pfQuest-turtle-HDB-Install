@@ -1,5 +1,11 @@
 # pfQuest base patch notes
 
+## 0.1.0-alpha.13 — 2026-09-29
+
+- Restored active quest objectives when removing an accidentally hidden quest from the Journal and fixed the Journal remove button's hover flicker.
+- Kept route arrows on active objectives when a higher-priority quest marker shares the same NPC or coordinates.
+- Selected the active quest ID for map pins, tracker entries, and routes in same-title quest chains.
+
 ## 0.1.0-alpha.12 — 2026-09-26
 
 - Reorganized the configuration window into five tabs while preserving all existing settings and live-update behavior.

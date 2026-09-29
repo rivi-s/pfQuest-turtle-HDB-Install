@@ -1,5 +1,12 @@
 # pfQuest Turtle patch notes
 
+## 0.1.0-alpha.13 — 2026-09-29
+
+- Restored 64 missing prerequisite relationships that could expose later chain steps too early, including Vimes's Report.
+- Added missing routes and objective sources for Reports of Dustwallow, The Land of Kings, and The Missing Diplomat at Sentry Point.
+- Removed both obsolete Stinky's Escape variants and their removed quest NPC.
+- Rebuilt and validated the packaged Turtle HearthDB database.
+
 ## 0.1.0-alpha.12 — 2026-09-26
 
 - Added Turtle-only Trees & Wood tracking backed by HearthDB, with 36 Survival gathering-object relations and automatic skill filtering.

@@ -6,8 +6,17 @@
 local turtleQuests = pfDB["quests"] and pfDB["quests"]["data-turtle"]
 local turtleUnits = pfDB["units"] and pfDB["units"]["data-turtle"]
 
+-- The Mallet of Zeth is used on the Gong of Corthan for The Land of Kings.
+local turtleItemRequirements = pfDB["quests-itemreq"] and pfDB["quests-itemreq"]["data-turtle"]
+if turtleItemRequirements then
+  turtleItemRequirements[60944] = { [-2010946] = 0 }
+end
+
 -- Kex Blowmaster and his Horde quest chain were removed from the game.
 if turtleUnits then turtleUnits[60443] = "_" end
+
+-- "Stinky" Ignatz and both faction variants of his escort quest were removed.
+if turtleUnits then turtleUnits[4880] = "_" end
 
 -- Interacting with the Mysterious Glittering Object summons Kheyna
 -- Spinpistol, who completes A Letter From a Friend and offers the follow-up.
@@ -16,6 +25,53 @@ if turtleUnits and turtleUnits[81041] then
 end
 
 if turtleQuests then
+  turtleQuests[1222] = "_"
+  turtleQuests[1270] = "_"
+
+  if turtleQuests[1265] then
+    turtleQuests[1265]["obj"] = { ["A"] = { 1667 } }
+    turtleQuests[1265]["end"] = { ["A"] = { 1667 } }
+  end
+
+  -- Turtle's extracted overrides replace complete vanilla quest rows. Restore
+  -- vanilla prerequisite chains that the overrides omitted, while retaining
+  -- Turtle-specific faction, objective, and endpoint changes.
+  local inheritedPrerequisites = {
+    [95] = { 164 }, [138] = { 136 }, [139] = { 138 }, [140] = { 139 },
+    [364] = { 363 }, [597] = { 595 }, [625] = { 624 }, [626] = { 625 },
+    [902] = { 901 }, [960] = { 944 }, [1130] = { 882 }, [1194] = { 1190 },
+    [1801] = { 2996, 3001 }, [2701] = { 2702 }, [3454] = { 3453 },
+    [3525] = { 3523 }, [3792] = { 3791 }, [3913] = { 3912 },
+    [3914] = { 3913 }, [4122] = { 4082 }, [5050] = { 5048, 5049 },
+    [5084] = { 5083 }, [5085] = { 5084 }, [5143] = { 2853 },
+    [5148] = { 2860 }, [5164] = { 5162 }, [5265] = { 5264 },
+    [5463] = { 5462 }, [5464] = { 5463 }, [5942] = { 5721 },
+    [6383] = { 235, 742, 6382 }, [7508] = { 7507 }, [7668] = { 7667 },
+    [7795] = { 7791, 7793, 7794 }, [7800] = { 7792, 7798, 7799 },
+    [7805] = { 7802, 7803, 7804 }, [7811] = { 7807, 7808, 7809 },
+    [7818] = { 7813, 7814, 7817 }, [7823] = { 7820, 7821, 7822 },
+    [7824] = { 7826, 7827, 7831 }, [7836] = { 7833, 7834, 7835 },
+    [8115] = { 8114 }, [8122] = { 8121 }, [8271] = { 7141 },
+    [8272] = { 7142 }, [8484] = { 8481 }, [8485] = { 8481 },
+    [8811] = { 8795 }, [8812] = { 8795 }, [8813] = { 8795 },
+    [8814] = { 8795 }, [8815] = { 8792 }, [8816] = { 8792 },
+    [8817] = { 8792 }, [8818] = { 8792 }, [8819] = { 8795 },
+    [8820] = { 8795 }, [8821] = { 8795 }, [8822] = { 8795 },
+    [8823] = { 8792 }, [8824] = { 8792 }, [8825] = { 8792 },
+    [8826] = { 8792 },
+  }
+  for questID, prerequisites in pairs(inheritedPrerequisites) do
+    if turtleQuests[questID] then turtleQuests[questID]["pre"] = prerequisites end
+  end
+
+  if turtleQuests[1288] then
+    turtleQuests[1288]["pre"] = { 1287 }
+  end
+
+  if turtleQuests[40713] and turtleQuests[40713]["obj"] then
+    turtleQuests[40713]["obj"]["IR"] = { 60944 }
+  end
+
   if turtleQuests[80407] then
     turtleQuests[80407]["obj"] = { ["O"] = { 3000246 } }
   end
@@ -104,6 +160,16 @@ end
 
 if turtleItems and turtleItems[41737] then
   turtleItems[41737]["U"] = { [62146] = 100 }
+end
+
+-- Reports of Dustwallow: Sentry Point Report comes from Captain Wallace
+-- Cross, and North Point Report comes from Captain Harker.
+if turtleItems and turtleItems[60602] then
+  turtleItems[60602]["U"] = { [60729] = 100 }
+end
+
+if turtleItems and turtleItems[60603] then
+  turtleItems[60603]["U"] = { [60730] = 100 }
 end
 
 -- Windtorn Crest Stone is guaranteed from Razorgust.
