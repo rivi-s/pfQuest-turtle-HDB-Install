@@ -171,7 +171,25 @@ local function SameNonemptySet(first, second)
   return true
 end
 
-local function PrerequisitesSatisfied(value)
+local function RequiredPrerequisites(id)
+  id = tonumber(id)
+  if not id or not pfDB or not pfDB.quests then return nil end
+  if pfDB.quests.preall and pfDB.quests.preall[id] then
+    return pfDB.quests.preall[id]
+  end
+  local quest = pfDB.quests["data-turtle"] and pfDB.quests["data-turtle"][id]
+    or pfDB.quests["data"] and pfDB.quests["data"][id]
+  return type(quest) == "table" and quest.preall or nil
+end
+
+local function PrerequisitesSatisfied(value, id)
+  local required = RequiredPrerequisites(id)
+  if required then
+    for _, prerequisite in pairs(required) do
+      if not pfQuest_history[tonumber(prerequisite)] then return false end
+    end
+    return true
+  end
   if not value or value == "" then return true end
   for prerequisite in string.gfind(value, "[^,]+") do
     if pfQuest_history[tonumber(prerequisite)] then return true end
@@ -291,7 +309,7 @@ function pfDatabase:ResolveQuestLogIDHDB(qlogid, title, level, preserveSelection
 
       if table.getn(remaining) > 1 then
         local eligible = FilterQuestCandidates(remaining, function(record)
-          return PrerequisitesSatisfied(record.prerequisites)
+          return PrerequisitesSatisfied(record.prerequisites, record.id)
         end)
         if table.getn(eligible) > 0 then remaining = eligible end
       end
@@ -695,13 +713,14 @@ end
 
 function pfDatabase:StoreQuestHDBCache(id, qlogid, result)
   local targets, spawns = IndexPins(result.pins)
+  local _, liveLevel = compat.GetQuestLogTitle(qlogid)
   local record = {
     id = id,
     qlogid = qlogid,
     title = result.title,
     objective = result.objective,
     description = result.description,
-    level = result.level,
+    level = tonumber(liveLevel) or result.level,
     hasObjectives = result.hasObjectives,
     pins = result.pins or {},
     targets = targets,
@@ -751,6 +770,8 @@ function pfDatabase:ReindexQuestHDBCache(id, qlogid)
   local record = id and GetActiveQuestCache()[id]
   if not record or not qlogid or not IsCurrentQuest(id, qlogid) then return false end
   record.qlogid = qlogid
+  local _, liveLevel = compat.GetQuestLogTitle(qlogid)
+  record.level = tonumber(liveLevel) or record.level
   pfDatabase:RefreshQuestHDBState(id, qlogid)
   return true
 end
@@ -851,14 +872,7 @@ function pfDatabase:FilterHDBAvailableStartPins(pins)
       eligible = false
     end
     if eligible and pin.prerequisites and pin.prerequisites ~= "" then
-      local prereqComplete = false
-      for prerequisite in string.gfind(pin.prerequisites, "[^,]+") do
-        if pfQuest_history[tonumber(prerequisite)] then
-          prereqComplete = true
-          break
-        end
-      end
-      eligible = prereqComplete
+      eligible = PrerequisitesSatisfied(pin.prerequisites, pin.questID)
     end
     if eligible and pin.skill and pin.skill ~= "" then
       eligible = pfDatabase:GetPlayerSkillCached(pin.skill) and true or false
@@ -962,6 +976,7 @@ AddPin = function(id, qlogid, quest, pin, complete)
     texture = texture,
     item = item,
     itemreq = pin.originKind == "IR" and (pin.itemTitle or pfDB.items.loc[pin.originID]) or nil,
+    sharedspawns = pin.sharedSpawns,
     -- Match normal pfQuest types so map/minimap tooltips retain their
     -- established description and progress formatting.
     QTYPE = qtype,

@@ -666,10 +666,11 @@ function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
   local allDone = true
   for index = 1, objectives do
     local text, kind, done = compat.GetQuestLogLeaderBoard(index, qlogid)
-    if not done then allDone = false end
+    local objectiveDone = done and true or false
     if kind == "monster" then
       local name, current, needed = pfUI.api.cmatch(text, QUEST_MONSTERS_KILLED)
       local state = ((current and needed and current + 0 >= needed + 0) or done) and "DONE" or "PROG"
+      objectiveDone = state == "DONE"
       if name then
         local matched
         for pinIndex = 1, table.getn(identity and identity.pins or {}) do
@@ -688,6 +689,7 @@ function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
       end
     elseif kind == "item" then
       local name, current, needed = pfUI.api.cmatch(text, QUEST_OBJECTS_FOUND)
+      objectiveDone = ((current and needed and current + 0 >= needed + 0) or done) and true or false
       if name then
         local matched
         local itemIDs = {}
@@ -704,9 +706,11 @@ function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
           local state = ((needed and carried >= needed + 0)
             or (current and needed and current + 0 >= needed + 0) or done) and "DONE" or "PROG"
           states.I[id] = state
+          if state == "DONE" then objectiveDone = true end
         end
       end
     end
+    if not objectiveDone then allDone = false end
   end
   return states, allDone and true or false
 end
@@ -1922,7 +1926,14 @@ function pfDatabase:QuestFilter(id, plevel, pclass, prace)
   end
 
   -- hide missing pre-quests
-  if quests[id]["pre"] then
+  local requiredPre = quests[id]["preall"]
+    or (pfDB["quests"]["preall"] and pfDB["quests"]["preall"][id])
+  if requiredPre then
+    -- Convergence quests require every listed branch to be complete.
+    for _, prequest in pairs(requiredPre) do
+      if not pfQuest_history[prequest] then return end
+    end
+  elseif quests[id]["pre"] then
     -- check all pre-quests for one to be completed
     local one_complete = nil
     for _, prequest in pairs(quests[id]["pre"]) do

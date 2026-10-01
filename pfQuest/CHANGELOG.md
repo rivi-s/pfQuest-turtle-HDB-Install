@@ -1,5 +1,13 @@
 # pfQuest base patch notes
 
+## 0.1.0-alpha.14 — 2026-09-30
+
+- Restored accurate unit-tooltip counters across multi-objective kill quests and added shared-spawn creature names to HDB nodes.
+- Recognized completed item objectives from their visible counts when Turtle omits the client completion flag.
+- Recalculated routes after quest turn-in and used live Quest Log levels for route-arrow labels.
+- Added required-all prerequisite support for convergence quests such as Zanzil's Mixture and a Fool's Stout.
+- Added a shared-coordinate database index so objective markers rebuild promptly after login and reload.
+
 ## 0.1.0-alpha.13 — 2026-09-29
 
 - Restored active quest objectives when removing an accidentally hidden quest from the Journal and fixed the Journal remove button's hover flicker.

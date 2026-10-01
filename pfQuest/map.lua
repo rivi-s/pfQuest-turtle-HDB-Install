@@ -404,6 +404,36 @@ local function ObjectiveNameMatches(spawn, objective)
     or objective == spawn .. "es" or spawn == objective .. "es"
 end
 
+-- Some Turtle clients expose a pfUI cmatch helper that does not preserve the
+-- positional captures in QUEST_MONSTERS_KILLED. The quest tracker still has
+-- the right text, but the unit tooltip then falls back to the bare mob name.
+-- Keep cmatch as the locale-aware path and recover from the visible `n/n`
+-- progress text only when its returned name cannot identify this spawn.
+local function MatchMonsterObjective(text, spawn)
+  local name, current, needed = pfUI.api.cmatch(text, QUEST_MONSTERS_KILLED)
+  if name and ObjectiveNameMatches(spawn, name) then return name, current, needed end
+
+  -- If cmatch lost or reordered the localized captures, the visible tracker
+  -- text still begins with the objective creature and ends in `current/needed`.
+  -- Anchoring the known spawn at the start avoids partial-name collisions
+  -- such as matching "Wolf" inside "Dire Wolf".
+  local lowerText = string.lower(tostring(text or ""))
+  local lowerSpawn = string.lower(tostring(spawn or ""))
+  if lowerSpawn ~= "" and string.find(lowerText, lowerSpawn, 1, true) == 1 then
+    local _, _, progress, required = strfind(text, "(%d+)%s*/%s*(%d+)")
+    if progress and required then return spawn, progress, required end
+  end
+
+  local _, _, raw1, raw2, raw3 = strfind(text, pfUI.api.SanitizePattern(QUEST_MONSTERS_KILLED))
+  local raw = { raw1, raw2, raw3 }
+  for index = 1, table.getn(raw) do
+    if raw[index] and ObjectiveNameMatches(spawn, raw[index]) then
+      local _, _, progress, required = strfind(text, "(%d+)%s*/%s*(%d+)")
+      if progress and required then return raw[index], progress, required end
+    end
+  end
+end
+
 function pfMap:ShowTooltip(meta, tooltip)
   local catch = nil
   local catch_obj = nil
@@ -436,7 +466,7 @@ function pfMap:ShowTooltip(meta, tooltip)
             if type == "monster" or meta["QTYPE"] == "UNIT_OBJECTIVE"
                 or meta["QTYPE"] == "UNIT_OBJECTIVE_ITEMREQ" then
               -- kill
-              local monsterName, objNum, objNeeded = pfUI.api.cmatch(text, QUEST_MONSTERS_KILLED)
+              local monsterName, objNum, objNeeded = MatchMonsterObjective(text, meta["spawn"])
               if monsterName and ObjectiveNameMatches(meta["spawn"], monsterName) then
                 catch_obj = true
                 local r, g, b = pfMap.tooltip:GetColor(objNum, objNeeded)
@@ -991,6 +1021,10 @@ function pfMap:DeleteNode(addon, title)
   elseif pfMap.titleIndex[addon] and pfMap.titleIndex[addon][title] then
     -- fast path: use reverse index to find exactly which (map, coords) to clear
     for map, coords_set in pairs(pfMap.titleIndex[addon][title]) do
+      -- Removing the last title at a coordinate still changes the route input.
+      -- Always invalidate every affected map so automatic routing drops stale
+      -- coordinates and selects the next active quest immediately.
+      pfMap.dirtyMaps[map] = true
       if pfMap.nodes[addon] and pfMap.nodes[addon][map] then
         for coords in pairs(coords_set) do
           if pfMap.nodes[addon][map][coords] then
@@ -1001,7 +1035,6 @@ function pfMap:DeleteNode(addon, title)
               -- coord survives with remaining titles; reprocess on next UpdateNodes
               pfMap.dirtyNodes[pfMap.nodes[addon][map][coords]] = true
               pfMap.dirtyMinimapNodes[pfMap.nodes[addon][map][coords]] = true
-              pfMap.dirtyMaps[map] = true
             end
           end
         end

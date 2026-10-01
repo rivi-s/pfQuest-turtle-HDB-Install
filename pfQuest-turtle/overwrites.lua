@@ -72,6 +72,16 @@ if turtleQuests then
     turtleQuests[40713]["obj"]["IR"] = { 60944 }
   end
 
+  -- The Black Waltz begins by interacting with Aliattan's Campfire, which
+  -- then spawns the Widow event represented by the existing unit objective.
+  if turtleQuests[40908] and turtleQuests[40908]["obj"] then
+    turtleQuests[40908]["obj"]["O"] = { 2020026 }
+  end
+
+  -- The extracted level for Spitecrest Decursions is stale. Turtle's live
+  -- quest log reports this step as level 47.
+  if turtleQuests[40947] then turtleQuests[40947]["lvl"] = 47 end
+
   if turtleQuests[80407] then
     turtleQuests[80407]["obj"] = { ["O"] = { 3000246 } }
   end

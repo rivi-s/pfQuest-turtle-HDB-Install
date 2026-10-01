@@ -1008,7 +1008,17 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
       COALESCE(s.zone_id, a.zone_id, z.map_id), COALESCE(s.respawn, '0'),
       COALESCE(e.title, zt.title,
         CASE WHEN q.target_kind = 'A' THEN 'Exploration Trigger ' || q.target_id END),
-      it.title
+      it.title,
+      (SELECT GROUP_CONCAT(shared_e.title, '|')
+        FROM spawn shared_s
+        JOIN entity_text shared_e ON shared_e.target_kind = 'U'
+          AND shared_e.target_id = shared_s.target_id
+          AND shared_e.locale = ']] .. CurrentLocale() .. [['
+        WHERE q.target_kind = 'U'
+          AND shared_s.target_kind = 'U'
+          AND shared_s.zone_id = s.zone_id
+          AND shared_s.x = s.x AND shared_s.y = s.y
+          AND shared_s.target_id <> q.target_id) AS shared_titles
     FROM resolved_target q
     LEFT JOIN spawn s ON s.target_kind = q.target_kind AND s.target_id = q.target_id
     LEFT JOIN areatrigger_spawn a ON q.target_kind = 'A' AND a.trigger_id = q.target_id
@@ -1033,6 +1043,8 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
     local records = {}
     for index = 1, table.getn(rows or {}) do
       local row = rows[index]
+      local sharedSpawns = {}
+      for title in string.gfind(row[16] or "", "[^|]+") do sharedSpawns[title] = true end
       table.insert(records, {
         phase = row[1],
         targetKind = row[2],
@@ -1044,6 +1056,7 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
         rank = row[9], x = tonumber(row[10]),
         y = tonumber(row[11]), zoneID = tonumber(row[12]),
         respawn = tonumber(row[13]), title = row[14], itemTitle = row[15],
+        sharedSpawns = next(sharedSpawns) and sharedSpawns or nil,
       })
     end
     questTargetCache[cacheKey] = records
@@ -1138,6 +1151,7 @@ function pfQuestHearthDB:GetQuestMapPinsAsync(id, callback, limit)
             respawn = row.respawn,
             title = row.title or (row.targetKind .. " " .. row.targetID),
             itemTitle = row.itemTitle,
+            sharedSpawns = row.sharedSpawns,
           })
         end
       end
