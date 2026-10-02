@@ -144,6 +144,7 @@ pfQuest.queue = {}
 pfQuest.queueCount = 0 -- Track queue size to avoid O(n) tsize() calls
 pfQuest.abandon = ""
 pfQuest.abandonID = nil
+pfQuest.turnedInQuestIDs = {}
 pfQuest.questlog = {}
 pfQuest.questlog_tmp = {}
 
@@ -198,9 +199,25 @@ pfQuest:SetScript("OnEvent", function()
     -- log between two legacy QUEST_LOG_UPDATE scans.
     local questid = tonumber(arg1)
     if questid then
+      pfQuest.turnedInQuestIDs[questid] = true
       pfQuest_history[questid] = { time(), UnitLevel("player") }
       if pfJournal then pfJournal.dirty = true end
     end
+  elseif event == "QUEST_REMOVED" then
+    local questid = tonumber(arg1)
+    if questid then
+      -- ClassicAPI emits QUEST_TURNED_IN before QUEST_REMOVED for a hand-in.
+      -- An ID removed without that server-authoritative completion event is
+      -- an abandon. This is more reliable on Turtle than the legacy global
+      -- AbandonQuest hook and arrives before our deferred quest-log scan.
+      if not pfQuest.turnedInQuestIDs[questid] then
+        pfQuest.abandonID = questid
+        local active = pfQuest.questlog and pfQuest.questlog[questid]
+        pfQuest.abandon = active and active.title or GetCanonicalQuestTitle(questid) or ""
+      end
+      pfQuest.turnedInQuestIDs[questid] = nil
+    end
+    pfQuest.updateQuestLog = true
   elseif event == "SKILL_LINES_CHANGED" then
     -- Use table.concat to avoid string concatenation garbage
     local skillParts = {}
