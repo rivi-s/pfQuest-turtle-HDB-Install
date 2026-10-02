@@ -1311,10 +1311,22 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
   if not Enabled() then return false end
   id = tonumber(id)
   local cached = id and hdbQuestGiverPins[id]
-  -- Always refresh this one quest after abandonment. Reusing the pre-accept
-  -- cache synchronously can run while the client is still publishing the old
-  -- active row, causing FilterHDBAvailableStartPins to reject the quest and
-  -- leave its giver absent until a later full map refresh.
+  -- These pins were already filtered immediately before the quest was
+  -- accepted. Restore them directly after abandonment: running them through
+  -- the availability filter again can still see the client's stale active
+  -- quest row and discard every starter until the next background refresh.
+  if cached and table.getn(cached) > 0 then
+    local plevel = UnitLevel("player")
+    for index = 1, table.getn(cached) do
+      AddAvailablePin(cached[index], plevel, meta and meta.addon)
+    end
+    hdbQuestGiverSet[id] = cached[1].quest
+    pfMap.queue_update = GetTime()
+    return true
+  end
+
+  -- Profiles loaded with the quest already active may not have a retained
+  -- starter list. Query only that quest as the fallback in that case.
   if id and type(pfQuestHearthDB.GetQuestStartPinsAsync) == "function" then
     local _, race = UnitRace("player")
     local _, class = UnitClass("player")
@@ -1341,15 +1353,7 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
     end)
     return accepted and true or false
   end
-  if not cached then return false end
-  local visible = CollapseHDBItemStartPins(pfDatabase:FilterHDBAvailableStartPins(cached))
-  local plevel = UnitLevel("player")
-  for index = 1, table.getn(visible) do
-    AddAvailablePin(visible[index], plevel, meta and meta.addon)
-  end
-  if visible[1] then hdbQuestGiverSet[id] = visible[1].quest end
-  pfMap.queue_update = GetTime()
-  return true
+  return false
 end
 
 function pfDatabase:SearchMetaRelationHDB(query, meta, callback)
