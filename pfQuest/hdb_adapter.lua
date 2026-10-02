@@ -1037,6 +1037,11 @@ function pfDatabase:SearchQuestIDHDB(id, meta)
   local record = GetActiveQuestCache()[id]
   if record and record.qlogid == qlogid then
     pfDatabase:RenderQuestHDBCache(id, qlogid, true)
+    -- Cached quests are the normal path for objective and completion updates.
+    -- Rendering mutates the node database, but it must also wake the map's
+    -- always-on update driver so the tracker, minimap, and route refresh while
+    -- the world map is closed.
+    pfMap.queue_update = GetTime()
     return true
   end
 
