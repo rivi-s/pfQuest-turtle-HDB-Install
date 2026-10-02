@@ -466,8 +466,19 @@ function pfMap:ShowTooltip(meta, tooltip)
             if type == "monster" or meta["QTYPE"] == "UNIT_OBJECTIVE"
                 or meta["QTYPE"] == "UNIT_OBJECTIVE_ITEMREQ" then
               -- kill
-              local monsterName, objNum, objNeeded = MatchMonsterObjective(text, meta["spawn"])
-              if monsterName and ObjectiveNameMatches(meta["spawn"], monsterName) then
+              local matchedObjective = meta["spawn"]
+              local monsterName, objNum, objNeeded = MatchMonsterObjective(text, matchedObjective)
+              if not monsterName and meta["QTYPE"] == "UNIT_OBJECTIVE_ITEMREQ"
+                  and meta["relatedobjectives"] then
+                for objectiveName in pairs(meta["relatedobjectives"]) do
+                  monsterName, objNum, objNeeded = MatchMonsterObjective(text, objectiveName)
+                  if monsterName then
+                    matchedObjective = objectiveName
+                    break
+                  end
+                end
+              end
+              if monsterName and ObjectiveNameMatches(matchedObjective, monsterName) then
                 catch_obj = true
                 local r, g, b = pfMap.tooltip:GetColor(objNum, objNeeded)
                 tooltip:AddLine("|cffaaaaaa- |r" .. monsterName .. ": " .. objNum .. "/" .. objNeeded, r, g, b)
@@ -1280,6 +1291,7 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
       frame.icon = tab.icon
       frame.fade_range = tab.fade_range
       frame.sharedspawns = tab.sharedspawns
+      frame.relatedobjectives = tab.relatedobjectives
 
       if pfQuest_config["spawncolors"] == "1" then
         frame.color = tab.spawn or tab.title

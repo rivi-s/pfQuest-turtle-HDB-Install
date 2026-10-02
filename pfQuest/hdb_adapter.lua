@@ -977,6 +977,7 @@ AddPin = function(id, qlogid, quest, pin, complete)
     item = item,
     itemreq = pin.originKind == "IR" and (pin.itemTitle or pfDB.items.loc[pin.originID]) or nil,
     sharedspawns = pin.sharedSpawns,
+    relatedobjectives = pin.relatedObjectives,
     -- Match normal pfQuest types so map/minimap tooltips retain their
     -- established description and progress formatting.
     QTYPE = qtype,

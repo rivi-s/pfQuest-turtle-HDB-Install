@@ -557,6 +557,7 @@ function pfQuest:UpdateQuestlog()
         for i = 1, objectives, 1 do
           local text, _, done = compat.GetQuestLogLeaderBoard(i, qlogid)
           stateParts[getn(stateParts) + 1] = i
+          stateParts[getn(stateParts) + 1] = text or ""
           stateParts[getn(stateParts) + 1] = done and "done" or "todo"
         end
       end

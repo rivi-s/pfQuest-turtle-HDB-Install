@@ -1018,7 +1018,18 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
           AND shared_s.target_kind = 'U'
           AND shared_s.zone_id = s.zone_id
           AND shared_s.x = s.x AND shared_s.y = s.y
-          AND shared_s.target_id <> q.target_id) AS shared_titles
+          AND shared_s.target_id <> q.target_id) AS shared_titles,
+      (SELECT GROUP_CONCAT(objective_e.title, '|')
+        FROM quest_target objective_q
+        JOIN entity_text objective_e
+          ON objective_e.target_kind = objective_q.target_kind
+          AND objective_e.target_id = objective_q.target_id
+          AND objective_e.locale = ']] .. CurrentLocale() .. [['
+        WHERE q.origin_kind = 'IR'
+          AND objective_q.quest_id = q.quest_id
+          AND objective_q.phase = 'obj'
+          AND objective_q.target_kind IN ('U', 'O')
+          AND objective_q.target_id <> q.target_id) AS related_objective_titles
     FROM resolved_target q
     LEFT JOIN spawn s ON s.target_kind = q.target_kind AND s.target_id = q.target_id
     LEFT JOIN areatrigger_spawn a ON q.target_kind = 'A' AND a.trigger_id = q.target_id
@@ -1045,6 +1056,8 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
       local row = rows[index]
       local sharedSpawns = {}
       for title in string.gfind(row[16] or "", "[^|]+") do sharedSpawns[title] = true end
+      local relatedObjectives = {}
+      for title in string.gfind(row[17] or "", "[^|]+") do relatedObjectives[title] = true end
       table.insert(records, {
         phase = row[1],
         targetKind = row[2],
@@ -1057,6 +1070,7 @@ function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
         y = tonumber(row[11]), zoneID = tonumber(row[12]),
         respawn = tonumber(row[13]), title = row[14], itemTitle = row[15],
         sharedSpawns = next(sharedSpawns) and sharedSpawns or nil,
+        relatedObjectives = next(relatedObjectives) and relatedObjectives or nil,
       })
     end
     questTargetCache[cacheKey] = records
@@ -1152,6 +1166,7 @@ function pfQuestHearthDB:GetQuestMapPinsAsync(id, callback, limit)
             title = row.title or (row.targetKind .. " " .. row.targetID),
             itemTitle = row.itemTitle,
             sharedSpawns = row.sharedSpawns,
+            relatedObjectives = row.relatedObjectives,
           })
         end
       end
