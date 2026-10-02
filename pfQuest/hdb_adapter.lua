@@ -1185,6 +1185,17 @@ function pfDatabase:SearchQuestGiversHDB(meta)
   local accepted = pfQuestHearthDB:GetQuestStartPinsAsync(options, function(pins, err)
     if request ~= hdbQuestGiverRequest or err or not pins then return end
     pfDatabase:BuildSkillCache()
+    -- Retain starter pins even for quests filtered out because they are
+    -- currently active. Turtle players can reload with a quest in progress
+    -- and then abandon it; keeping this internal cache lets that starter
+    -- return synchronously instead of waiting for another SQLite request.
+    local cachedByQuest = {}
+    local cachedPins = CollapseHDBItemStartPins(pins)
+    for index = 1, table.getn(cachedPins) do
+      local pin = cachedPins[index]
+      cachedByQuest[pin.questID] = cachedByQuest[pin.questID] or {}
+      table.insert(cachedByQuest[pin.questID], pin)
+    end
     local visible = CollapseHDBItemStartPins(pfDatabase:FilterHDBAvailableStartPins(pins))
     local current, byQuest = {}, {}
     for index = 1, table.getn(visible) do
@@ -1195,7 +1206,7 @@ function pfDatabase:SearchQuestGiversHDB(meta)
     end
 
     for id in pairs(hdbQuestGiverPins) do hdbQuestGiverPins[id] = nil end
-    for id, list in pairs(byQuest) do hdbQuestGiverPins[id] = list end
+    for id, list in pairs(cachedByQuest) do hdbQuestGiverPins[id] = list end
 
     local rebuild = {}
     for id in pairs(hdbQuestGiverSet) do
@@ -1233,6 +1244,28 @@ function pfDatabase:MarkQuestAcceptedHDB(id)
   local questID = tonumber(id)
   if questID then
     hdbQuestGiverSet[questID] = nil
+    -- A reload can discover the quest only after it is already active, so the
+    -- normal available-giver query may never have cached its starter (notably
+    -- for low-level Turtle quests hidden by the configured level range).
+    -- Prefetch only this starter for a future abandon without drawing it now.
+    if not hdbQuestGiverPins[questID]
+      and type(pfQuestHearthDB.GetQuestStartPinsAsync) == "function" then
+      local _, race = UnitRace("player")
+      local _, class = UnitClass("player")
+      pfQuestHearthDB:GetQuestStartPinsAsync({
+        questID = questID,
+        level = UnitLevel("player"),
+        includeAllLevels = true,
+        includeEvents = pfQuest_config["showfestival"] == "1",
+        raceMask = pfDatabase:GetBitByRace(race),
+        classMask = pfDatabase:GetBitByClass(class),
+        faction = UnitFactionGroup("player") == "Horde" and "H" or "A",
+      }, function(pins, err)
+        if err or not pins then return end
+        local cached = CollapseHDBItemStartPins(pins)
+        if table.getn(cached) > 0 then hdbQuestGiverPins[questID] = cached end
+      end)
+    end
     return true
   end
 
@@ -1322,6 +1355,7 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
     end
     hdbQuestGiverSet[id] = cached[1].quest
     pfMap.queue_update = GetTime()
+    pfQuest.immediateAbandonRefresh = true
     return true
   end
 

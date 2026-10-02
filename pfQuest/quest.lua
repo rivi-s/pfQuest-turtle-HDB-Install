@@ -521,6 +521,19 @@ pfQuest:SetScript("OnUpdate", function()
       this.updateQuestGivers = true
       this.needsQuestGiverUpdate = false
     end
+
+    -- An abandoned quest can shift several Quest Log rows, producing REMOVE
+    -- plus multiple REINDEX entries. Wait until that complete batch has been
+    -- applied, then perform one synchronous tracker/route/minimap rebuild from
+    -- the restored cached starter instead of showing several staggered states.
+    if this.immediateAbandonRefresh then
+      this.immediateAbandonRefresh = nil
+      pfMap.queue_update = nil
+      pfMap.xPlayer = nil
+      pfMap.minimapTick = nil
+      pfMap:UpdateNodes()
+      pfMap:UpdateMinimap()
+    end
   end
 end)
 
