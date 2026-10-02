@@ -458,6 +458,21 @@ RenderPartyQuestPins = function()
     end
 end
 
+-- HDB resolves party objectives asynchronously and a full sync may complete
+-- many callbacks in one frame. Coalesce them so the party pin layer is drawn
+-- once after the burst instead of once per resolved objective.
+local partyPinRefresh = CreateFrame("Frame")
+local function QueuePartyPinRender()
+    partyPinRefresh.elapsed = 0
+    partyPinRefresh:SetScript("OnUpdate", function()
+        this.elapsed = this.elapsed + arg1
+        if this.elapsed >= 0.10 then
+            this:SetScript("OnUpdate", nil)
+            RenderPartyQuestPins()
+        end
+    end)
+end
+
 local function StoreRemoteQuestProgress(sender, targetName, questTitle, objectiveText, current, total, questId, targetId, targetType, pin)
     if not targetName or not questTitle then return end
     partyQuestData[sender] = partyQuestData[sender] or {}
@@ -518,7 +533,7 @@ local function ProcessHDBPartyEntry(sender, targetType, targetId, questId, curre
                     questId, target.targetID, target.targetKind, target)
             end
         end
-        if RenderPartyQuestPins then RenderPartyQuestPins() end
+        QueuePartyPinRender()
     end)
     return accepted and true or false
 end
@@ -576,30 +591,36 @@ local function ShareQuestData(forceFullSync)
         end
     end
 
-    for targetKey, quests in pairs(myQuestMappings) do
-        for _, questData in ipairs(quests) do
-            for qid = 1, GetNumQuestLogEntries() do
-                local questTitle = pfQuestCompat.GetQuestLogTitle(qid)
-
-                if questTitle == questData.quest then
-                    local numObjectives = tonumber(GetNumQuestLeaderBoards(qid)) or 0
-
-                    for i = 1, numObjectives do
-                        local text = GetQuestLogLeaderBoard(i, qid)
-
-                        if text then
-                            local _, _, objName, current, total = string.find(text, "(.*):%s*(%d+)%s*/%s*(%d+)")
-                            if objName then
-                                objName = string.gsub(objName, "^%s*(.-)%s*$", "%1")
-
-                                if objName == questData.objective then
-                                    questData.current = tonumber(current)
-                                    questData.total = tonumber(total)
-                                end
-                            end
-                        end
+    -- Read the quest log once, then apply progress to every mapped spawn.
+    -- Item objectives can map to many units/objects, so rescanning the full
+    -- log for each mapping caused a noticeable hitch during full party syncs.
+    local objectiveProgress = {}
+    for qid = 1, GetNumQuestLogEntries() do
+        local questTitle = pfQuestCompat.GetQuestLogTitle(qid)
+        if questTitle then
+            objectiveProgress[questTitle] = objectiveProgress[questTitle] or {}
+            local numObjectives = tonumber(GetNumQuestLeaderBoards(qid)) or 0
+            for i = 1, numObjectives do
+                local text = GetQuestLogLeaderBoard(i, qid)
+                if text then
+                    local _, _, objName, current, total = string.find(text, "(.*):%s*(%d+)%s*/%s*(%d+)")
+                    if objName then
+                        objName = string.gsub(objName, "^%s*(.-)%s*$", "%1")
+                        objectiveProgress[questTitle][objName] = {
+                            current = tonumber(current), total = tonumber(total)
+                        }
                     end
                 end
+            end
+        end
+    end
+    for _, quests in pairs(myQuestMappings) do
+        for _, questData in ipairs(quests) do
+            local progress = objectiveProgress[questData.quest]
+                and objectiveProgress[questData.quest][questData.objective]
+            if progress then
+                questData.current = progress.current
+                questData.total = progress.total
             end
         end
     end
@@ -1095,25 +1116,28 @@ end
 -- the active log and database relations, so coalesce those bursts into one
 -- pass after the client has settled.
 local mappingRefresh = CreateFrame("Frame")
-local function QueueMappingRefresh(forceFullSync)
+local function QueueMappingRefresh(forceFullSync, requestPeers)
     mappingRefresh.forceFullSync = mappingRefresh.forceFullSync or forceFullSync
+    mappingRefresh.requestPeers = mappingRefresh.requestPeers or requestPeers
     mappingRefresh.elapsed = 0
     mappingRefresh:SetScript("OnUpdate", function()
         this.elapsed = this.elapsed + arg1
         if this.elapsed >= 0.5 then
             local force = this.forceFullSync
+            local request = this.requestPeers
             this.forceFullSync = nil
+            this.requestPeers = nil
             this:SetScript("OnUpdate", nil)
             if GetNumPartyMembers() > 0 then
                 RebuildQuestMappings(function()
-                    if force then SendAddonMessage("PFQT_SYNC", "1", "PARTY") end
+                    if request then SendAddonMessage("PFQT_SYNC", "1", "PARTY") end
                     ShareQuestData(force)
                     -- myQuestMappings just changed, which is what
                     -- LocalPlayerHasObjective reads: re-evaluate now rather
                     -- than waiting for the next unrelated trigger, so a party
                     -- star drops out (or appears) as soon as the local player's
                     -- own quest state actually does.
-                    RenderPartyQuestPins()
+                    QueuePartyPinRender()
                 end)
             end
         end
@@ -1130,11 +1154,9 @@ eventFrame:SetScript("OnEvent", function()
         if prefix == "pfqt" then
             ProcessQuestData(sender, message)
             -- Covers the synchronous (static Lua fallback) storage path.
-            -- ProcessHDBPartyEntry's own async GetQuestMapPinsAsync callback
-            -- calls RenderPartyQuestPins itself once its data actually
-            -- arrives, since it hasn't necessarily resolved by the time
-            -- ProcessQuestData returns here.
-            RenderPartyQuestPins()
+            -- Async HDB results and multipart addon messages share the same
+            -- short render queue, so a full party sync produces one redraw.
+            QueuePartyPinRender()
         elseif prefix == "PFQT_SYNC" then
             if GetNumPartyMembers() > 0 and CanonicalPlayerName(sender) ~= CanonicalPlayerName(UnitName("player")) then
                 QueueMappingRefresh(true)
@@ -1142,16 +1164,16 @@ eventFrame:SetScript("OnEvent", function()
         end
     elseif event == "PARTY_MEMBERS_CHANGED" then
         CleanupPartyData()
-        RenderPartyQuestPins()
+        QueuePartyPinRender()
         if GetNumPartyMembers() > 0 then
-            QueueMappingRefresh(true)
+            QueueMappingRefresh(true, true)
         end
     elseif event == "QUEST_LOG_UPDATE" then
         if GetNumPartyMembers() > 0 then
             QueueMappingRefresh()
             -- Piggyback on this frequently-firing event to pick up a config
             -- checkbox toggle without a dedicated polling ticker.
-            RenderPartyQuestPins()
+            QueuePartyPinRender()
         end
     end
 end)
@@ -1205,7 +1227,7 @@ configExtenderFrame:SetScript("OnEvent", function()
     RenderPartyQuestPins()
 
     if GetNumPartyMembers() > 0 then
-        QueueMappingRefresh(true)
+        QueueMappingRefresh(true, true)
     end
 
     local timer = 0
