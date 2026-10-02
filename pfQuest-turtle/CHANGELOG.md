@@ -1,5 +1,12 @@
 # pfQuest Turtle patch notes
 
+## 0.1.0-alpha.15 — 2026-10-02
+
+- Reduced party quest synchronization work to prevent group joins and quest turn-ins from stuttering.
+- Enabled automatic acceptance and turn-in for newer Turtle report quests with objective-free hand-ins.
+- Corrected More Silk for the Wounded to start from Hara'ne and added her verified Moonwhisper Coast location.
+- Rebuilt and validated the packaged Turtle HearthDB database.
+
 ## 0.1.0-alpha.14 — 2026-09-30
 
 - Added Aliattan's Campfire as the event starter for The Black Waltz and corrected Spitecrest Decursions to level 47.

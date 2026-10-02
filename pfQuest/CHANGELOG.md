@@ -1,5 +1,11 @@
 # pfQuest base patch notes
 
+## 0.1.0-alpha.15 — 2026-10-02
+
+- Updated quest objectives and route arrows immediately after progress, completion, turn-in, and abandonment while the World Map is closed.
+- Restored abandoned quest markers immediately while preserving nearby completed quest markers as quest-log rows shift.
+- Improved Turtle quest-removal classification and added an optional abandon-flow diagnostic trace.
+
 ## 0.1.0-alpha.14 — 2026-09-30
 
 - Restored accurate unit-tooltip counters across multi-objective kill quests and added shared-spawn creature names to HDB nodes.
