@@ -460,8 +460,6 @@ pfQuest:SetScript("OnUpdate", function()
         pfQuest:Debug(format("|cffffff00TIMER DeleteNode(REMOVE): %.4fs", GetTime() - t0))
       end
 
-      pfQuest.abandon = ""
-      pfQuest.abandonID = nil
       if abandoned and type(pfDatabase.RestoreAbandonedQuestGiverHDB) == "function"
         and pfDatabase:RestoreAbandonedQuestGiverHDB(entry[2], { addon = "PFQUEST" }) then
         -- The single cached quest was restored without scanning every giver.
@@ -471,6 +469,13 @@ pfQuest:SetScript("OnUpdate", function()
       else
         -- Keep the complete eligibility refresh as the compatibility fallback.
         this.needsQuestGiverUpdate = true
+      end
+      -- A quest-log update can remove multiple entries in one unordered batch.
+      -- Preserve the abandon identity across unrelated removals and consume it
+      -- only after the matching quest has taken the abandon restoration path.
+      if abandoned then
+        pfQuest.abandon = ""
+        pfQuest.abandonID = nil
       end
     elseif entry[4] == "REINDEX" then
       pfQuest:Debug("Reindex Quest: " .. entry[1] .. " (" .. entry[2] .. ")")
