@@ -255,6 +255,18 @@ local function IsGreetingQuestReady(title)
                       and string.find(normalizedTarget, npcName, 1, true) then return true end
                 end
             end
+
+            -- Some newer Turtle report quests expose a synthetic unfinished
+            -- objective row even though their database record has no real
+            -- objective. The active row is only offered by the destination
+            -- NPC, so it is safe to select and advance these simple turn-ins.
+            if pfDatabase and pfDatabase.GetQuestIDs and pfDB and pfDB["quests"]
+              and pfDB["quests"]["data"] then
+                local ids = pfDatabase:GetQuestIDs(qlogid, true)
+                local questId = ids and tonumber(ids[1])
+                local questData = questId and pfDB["quests"]["data"][questId]
+                if questData and not questData["obj"] then return true end
+            end
         end
     end
     return false
@@ -352,8 +364,8 @@ local function SelectFirstCompletedActiveQuest()
     local numActiveQuests = GetNumActiveQuests()
     DebugAuto("active quest list: count=" .. tostring(numActiveQuests))
     for i = 1, numActiveQuests do
-        local title = GetActiveTitle(i)
-        local ready = title and IsGreetingQuestReady(title)
+        local title, complete = GetActiveTitle(i)
+        local ready = title and (complete == true or IsGreetingQuestReady(title))
         DebugAuto("active[" .. i .. "] title=" .. tostring(title) .. " ready=" .. tostring(ready and true or false))
         if title and ready then
             SelectActiveQuest(i)
