@@ -107,6 +107,14 @@ function pfQuest:Debug(msg)
   pfQuest.debugwin:Show()
 end
 
+-- Small always-on ring buffer for diagnosing the multi-event abandon path.
+-- It records strings only and performs no map/database work.
+pfQuest.abandonTrace = {}
+function pfQuest:TraceAbandon(msg)
+  table.insert(self.abandonTrace, format("%.3f %s", GetTime(), tostring(msg)))
+  if table.getn(self.abandonTrace) > 24 then table.remove(self.abandonTrace, 1) end
+end
+
 function pfQuest:SortedPairs(t, index, reverse)
   -- collect the keys
   local keys = {}
@@ -198,6 +206,7 @@ pfQuest:SetScript("OnEvent", function()
     -- instant auto turn-ins are not lost when a quest enters and leaves the
     -- log between two legacy QUEST_LOG_UPDATE scans.
     local questid = tonumber(arg1)
+    pfQuest:TraceAbandon("EVENT TURNED_IN id=" .. tostring(questid))
     if questid then
       pfQuest.turnedInQuestIDs[questid] = true
       pfQuest_history[questid] = { time(), UnitLevel("player") }
@@ -205,6 +214,8 @@ pfQuest:SetScript("OnEvent", function()
     end
   elseif event == "QUEST_REMOVED" then
     local questid = tonumber(arg1)
+    pfQuest:TraceAbandon("EVENT REMOVED id=" .. tostring(questid)
+      .. " turned=" .. tostring(questid and pfQuest.turnedInQuestIDs[questid] and true or false))
     if questid then
       -- ClassicAPI emits QUEST_TURNED_IN before QUEST_REMOVED for a hand-in.
       -- An ID removed without that server-authoritative completion event is
@@ -416,6 +427,11 @@ pfQuest:SetScript("OnUpdate", function()
       local canonicalTitle = GetCanonicalQuestTitle(entry[2])
       local abandoned = entry[1] == pfQuest.abandon
         or (pfQuest.abandonID and tonumber(entry[2]) == pfQuest.abandonID)
+      if abandoned then pfQuest.abandonTraceQuestID = tonumber(entry[2]) end
+      pfQuest:TraceAbandon("QUEUE REMOVE id=" .. tostring(entry[2])
+        .. " abandoned=" .. tostring(abandoned and true or false)
+        .. " hookID=" .. tostring(pfQuest.abandonID)
+        .. " hookTitle=" .. tostring(pfQuest.abandon))
       pfDatabase:ClearQuestHDBCache(entry[2])
       pfQuest:Debug("|cffff5555Remove Quest: " .. entry[1] .. " (" .. entry[2] .. ")")
 
@@ -544,12 +560,27 @@ pfQuest:SetScript("OnUpdate", function()
     -- applied, then perform one synchronous tracker/route/minimap rebuild from
     -- the restored cached starter instead of showing several staggered states.
     if this.immediateAbandonRefresh then
+      this:TraceAbandon("QUEUE settled: immediate redraw")
       this.immediateAbandonRefresh = nil
       pfMap.queue_update = nil
       pfMap.xPlayer = nil
       pfMap.minimapTick = nil
       pfMap:UpdateNodes()
       pfMap:UpdateMinimap()
+      local traceID = this.abandonTraceQuestID
+      local stored, shown = 0, 0
+      for _, maps in pairs((pfMap.nodes and pfMap.nodes.PFQUEST) or {}) do
+        for _, titles in pairs(maps) do
+          for _, node in pairs(titles) do
+            if tonumber(node.questid) == traceID then stored = stored + 1 end
+          end
+        end
+      end
+      for _, pin in pairs(pfMap.mpins or {}) do
+        if pin:IsShown() and tonumber(pin.questid) == traceID then shown = shown + 1 end
+      end
+      this:TraceAbandon("REDRAW id=" .. tostring(traceID)
+        .. " stored=" .. stored .. " minimapShown=" .. shown)
     end
   end
 end)
@@ -1354,6 +1385,8 @@ AbandonQuest = function()
       break
     end
   end
+  pfQuest:TraceAbandon("HOOK AbandonQuest id=" .. tostring(pfQuest.abandonID)
+    .. " title=" .. tostring(pfQuest.abandon))
   HookAbandonQuest()
 end
 

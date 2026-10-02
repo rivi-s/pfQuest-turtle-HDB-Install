@@ -96,6 +96,20 @@ SlashCmdList["PFDB"] = function(input, editbox)
     return
   end
 
+  -- argument: abandontrace
+  if arg1 == "abandontrace" then
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpf|cffffffffQuest abandon trace:")
+    local trace = pfQuest and pfQuest.abandonTrace or {}
+    if table.getn(trace) == 0 then
+      DEFAULT_CHAT_FRAME:AddMessage("  (empty)")
+    else
+      for index = 1, table.getn(trace) do
+        DEFAULT_CHAT_FRAME:AddMessage("  " .. trace[index])
+      end
+    end
+    return
+  end
+
   -- argument: hdbcache [questid]
   if arg1 == "hdbcache" then
     local questid = tonumber(arg2)

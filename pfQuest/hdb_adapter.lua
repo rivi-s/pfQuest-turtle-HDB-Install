@@ -1344,6 +1344,10 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
   if not Enabled() then return false end
   id = tonumber(id)
   local cached = id and hdbQuestGiverPins[id]
+  if pfQuest.TraceAbandon then
+    pfQuest:TraceAbandon("RESTORE id=" .. tostring(id)
+      .. " cachedPins=" .. tostring(cached and table.getn(cached) or 0))
+  end
   -- These pins were already filtered immediately before the quest was
   -- accepted. Restore them directly after abandonment: running them through
   -- the availability filter again can still see the client's stale active
@@ -1356,6 +1360,7 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
     hdbQuestGiverSet[id] = cached[1].quest
     pfMap.queue_update = GetTime()
     pfQuest.immediateAbandonRefresh = true
+    if pfQuest.TraceAbandon then pfQuest:TraceAbandon("RESTORE cached starter added") end
     return true
   end
 
@@ -1374,6 +1379,10 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
       faction = UnitFactionGroup("player") == "Horde" and "H" or "A",
     }
     local accepted = pfQuestHearthDB:GetQuestStartPinsAsync(options, function(pins, err)
+      if pfQuest.TraceAbandon then
+        pfQuest:TraceAbandon("RESTORE async result pins=" .. tostring(pins and table.getn(pins) or 0)
+          .. " err=" .. tostring(err))
+      end
       if err or not pins then return end
       pfDatabase:BuildSkillCache()
       local visible = CollapseHDBItemStartPins(pfDatabase:FilterHDBAvailableStartPins(pins))
@@ -1385,6 +1394,7 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
       if visible[1] then hdbQuestGiverSet[id] = visible[1].quest end
       pfMap.queue_update = GetTime()
     end)
+    if pfQuest.TraceAbandon then pfQuest:TraceAbandon("RESTORE async accepted=" .. tostring(accepted and true or false)) end
     return accepted and true or false
   end
   return false
