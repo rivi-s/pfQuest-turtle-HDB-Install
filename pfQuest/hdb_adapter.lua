@@ -1311,7 +1311,11 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
   if not Enabled() then return false end
   id = tonumber(id)
   local cached = id and hdbQuestGiverPins[id]
-  if not cached and id and type(pfQuestHearthDB.GetQuestStartPinsAsync) == "function" then
+  -- Always refresh this one quest after abandonment. Reusing the pre-accept
+  -- cache synchronously can run while the client is still publishing the old
+  -- active row, causing FilterHDBAvailableStartPins to reject the quest and
+  -- leave its giver absent until a later full map refresh.
+  if id and type(pfQuestHearthDB.GetQuestStartPinsAsync) == "function" then
     local _, race = UnitRace("player")
     local _, class = UnitClass("player")
     local options = {
