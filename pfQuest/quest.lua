@@ -610,8 +610,26 @@ function pfQuest:UpdateQuestlog()
       -- Quest Log is open, keep background refreshes read-only so collapsed
       -- categories remain collapsed through progress and completion updates.
       local preserveSelection = QuestLogFrame and QuestLogFrame:IsShown()
-      questid = pfDatabase:GetQuestIDs(qlogid, preserveSelection)
-      questid = questid and tonumber(questid[1]) or title
+      local resolved = pfDatabase:GetQuestIDs(qlogid, preserveSelection)
+      questid = resolved and tonumber(resolved[1])
+      if not questid then
+        -- Removing a quest shifts every row below it. HDB title resolution can
+        -- be pending for one scan during that transition; replacing an
+        -- existing numeric key with the title would emit a false REMOVE and
+        -- delete that quest's completed minimap marker. Reuse the prior ID
+        -- only when the active title identifies exactly one numeric quest.
+        local priorID
+        for activeID, active in pairs(pfQuest.questlog) do
+          if type(activeID) == "number" and active and active.title == title then
+            if priorID then
+              priorID = nil
+              break
+            end
+            priorID = activeID
+          end
+        end
+        questid = priorID or title
+      end
       watched = IsQuestWatched(qlogid)
 
       -- build state string using table.concat (avoid string concat garbage)
