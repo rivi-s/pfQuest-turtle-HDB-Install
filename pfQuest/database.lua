@@ -397,7 +397,7 @@ CreateFrame("Frame", "pfQuestLocaleCheck", UIParent):SetScript("OnUpdate", funct
   -- The HDB companion loads after pfQuest because it depends on it. Detect it
   -- on the first update and finish initialization without waiting for an item
   -- name that is intentionally absent from the unloaded Lua locale tables.
-  if pfQuestHearthDB and type(pfQuestHearthDB.GetQuestMapPinsAsync) == "function" then
+  if pfDatabase.IsHDBEnabled and pfDatabase:IsHDBEnabled() then
     pfDatabase.localized = true
     pfDatabase:BuildNameIndex()
     pfDatabase:BuildStaticRejectSet()
@@ -467,8 +467,7 @@ end)
 if isempty(pfDB["quests"]["loc"]) then
   CreateFrame("Frame"):SetScript("OnUpdate", function()
     local hdbEdition = type(pfDatabase.SearchQuestGiversHDB) == "function"
-    if hdbEdition and pfQuestHearthDB
-      and type(pfQuestHearthDB.GetQuestMapPinsAsync) == "function" then
+    if hdbEdition and pfDatabase:IsHDBEnabled() then
       this:Hide()
       return
     end

@@ -1,3 +1,10 @@
+-- Older standard cores do not expose the optional backend boundary.
+local function HDBEnabled()
+  return pfDatabase and type(pfDatabase.IsHDBEnabled) == "function"
+    and pfDatabase:IsHDBEnabled() or false
+end
+
+local PARTYPROGRESS_DEBUG = false
 local partyQuestData = {}
 local myQuestMappings = {}
 local lastBroadcastState = {}
@@ -34,7 +41,7 @@ local function CleanupPartyData()
 end
 
 local function RebuildQuestMappings(onComplete)
-    local hdbAvailable = pfQuestHearthDB and type(pfQuestHearthDB.GetQuestTargetsAsync) == "function"
+    local hdbAvailable = HDBEnabled() and type(pfQuestHearthDB.GetQuestTargetsAsync) == "function"
     if not hdbAvailable and (not pfDB or not pfDB["quests"] or not pfDB["quests"]["data"] or not pfDB["quests"]["enUS"]) then
         if onComplete then onComplete() end
         return
@@ -42,6 +49,7 @@ local function RebuildQuestMappings(onComplete)
 
     local activeQuests = {}
     local activeQuestIds = {}
+    local unresolvedTitles = {}
     local questIdByLogIndex = {}
     if pfQuest and pfQuest.questlog then
         for questId, state in pairs(pfQuest.questlog) do
@@ -60,7 +68,8 @@ local function RebuildQuestMappings(onComplete)
                 local ids = pfDatabase:GetQuestIDs(qid, preserveSelection)
                 questId = ids and tonumber(ids[1])
             end
-            if questId then activeQuestIds[questId] = { title = questTitle, objectives = activeQuests[questTitle] } end
+            if questId then activeQuestIds[questId] = { title = questTitle, objectives = activeQuests[questTitle] }
+            else unresolvedTitles[questTitle] = true end
             -- The client can briefly return nil while the quest log is
             -- unavailable during transitions such as taking a flight path.
             local numObjectives = tonumber(GetNumQuestLeaderBoards(qid)) or 0
@@ -130,7 +139,24 @@ local function RebuildQuestMappings(onComplete)
         return
     end
 
-    for questId, localizedData in pairs(pfDB["quests"]["enUS"]) do
+    -- Party joins and quest turn-ins can produce several QUEST_LOG_UPDATE
+    -- events. Only inspect the handful of active quest records instead of
+    -- walking the entire quest database for every refresh. The title fallback
+    -- is retained for the brief client states where a log index has no ID yet.
+    local candidateQuests = {}
+    for questId in pairs(activeQuestIds) do
+        local localizedData = pfDB["quests"]["enUS"][questId]
+        if localizedData then candidateQuests[questId] = localizedData end
+    end
+    if next(unresolvedTitles) then
+        for questId, localizedData in pairs(pfDB["quests"]["enUS"]) do
+            if localizedData["T"] and unresolvedTitles[localizedData["T"]] then
+                candidateQuests[questId] = localizedData
+            end
+        end
+    end
+
+    for questId, localizedData in pairs(candidateQuests) do
         local questTitle = localizedData["T"]
 
         if questTitle and activeQuests[questTitle] then
@@ -513,7 +539,7 @@ local function StoreRemoteQuestProgress(sender, targetName, questTitle, objectiv
 end
 
 local function ProcessHDBPartyEntry(sender, targetType, targetId, questId, current, total, objectiveText)
-    if not pfQuestHearthDB or type(pfQuestHearthDB.GetQuestMapPinsAsync) ~= "function" then return false end
+    if not HDBEnabled() or type(pfQuestHearthDB.GetQuestMapPinsAsync) ~= "function" then return false end
     local accepted = pfQuestHearthDB:GetQuestMapPinsAsync(questId, function(result, err)
         if err or not result then return end
         for _, target in ipairs(result.pins or {}) do
@@ -1274,4 +1300,101 @@ SlashCmdList["PFQUEREBUILD"] = function(msg)
         RenderPartyQuestPins()
         DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfQuest-turtle:|r Quest mappings rebuilt.")
     end)
+end
+
+SLASH_PFQUESTDEBUG1 = "/pfqd"
+SlashCmdList["PFQUESTDEBUG"] = function(msg)
+    local lowerMsg = msg and string.lower(msg)
+    if lowerMsg == "on" then
+        PARTYPROGRESS_DEBUG = true
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfQuest-turtle:|r Party progress debug logging ON - hover the mob to see what's happening")
+        return
+    elseif lowerMsg == "off" then
+        PARTYPROGRESS_DEBUG = false
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfQuest-turtle:|r Party progress debug logging OFF")
+        return
+    end
+
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfQuest-turtle Party Progress Debug:|r")
+    DEFAULT_CHAT_FRAME:AddMessage("Party members: " .. GetNumPartyMembers())
+    DEFAULT_CHAT_FRAME:AddMessage("Tooltip progress enabled: " .. tostring(pfQuest_config and pfQuest_config["showPartyProgress"] == "1"))
+    DEFAULT_CHAT_FRAME:AddMessage("Map pins enabled: " .. tostring(pfQuest_config and pfQuest_config["showPartyQuestPins"] == "1")
+        .. " (routable: " .. tostring(not pfQuest_config or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0") .. ")")
+
+    local count = 0
+    for _ in pairs(myQuestMappings) do count = count + 1 end
+    DEFAULT_CHAT_FRAME:AddMessage("myQuestMappings targets: " .. count)
+    for targetKey, quests in pairs(myQuestMappings) do
+        DEFAULT_CHAT_FRAME:AddMessage("  Target: " .. targetKey)
+        for _, data in ipairs(quests) do
+            DEFAULT_CHAT_FRAME:AddMessage("    - " .. data.quest .. ": " .. data.objective .. " (" .. data.current .. "/" .. data.total .. ")")
+        end
+    end
+
+    local partyCount = 0
+    local pinnableCount = 0
+    for _ in pairs(partyQuestData) do partyCount = partyCount + 1 end
+    DEFAULT_CHAT_FRAME:AddMessage("partyQuestData players: " .. partyCount)
+    for playerName, targets in pairs(partyQuestData) do
+        DEFAULT_CHAT_FRAME:AddMessage("  Player: " .. playerName)
+        for targetKey, quests in pairs(targets) do
+            DEFAULT_CHAT_FRAME:AddMessage("    Target: " .. targetKey)
+            for _, data in ipairs(quests) do
+                local pinnable = data.targetType and data.targetId and data.questId
+                  and (data.current or 0) < (data.total or 0)
+                if pinnable then pinnableCount = pinnableCount + 1 end
+                DEFAULT_CHAT_FRAME:AddMessage("      - " .. data.quest .. ": " .. data.objective .. " (" .. data.current .. "/" .. data.total .. ")"
+                    .. (pinnable and " |cff33ffcc[pinnable]|r" or ""))
+            end
+        end
+    end
+    DEFAULT_CHAT_FRAME:AddMessage("Pinnable party entries: " .. pinnableCount)
+
+    if count == 0 and partyCount == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000No quest data found!|r Try killing a quest mob, or run /pfqrebuild after joining a party.")
+    end
+end
+
+
+SLASH_PFQUESTTEST1 = "/pfqtest"
+SlashCmdList["PFQUESTTEST"] = function(msg)
+    if not msg or msg == "" then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfQuest-turtle:|r Usage: /pfqtest <exact unit name> - tooltip-only test, then mouseover that unit")
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfQuest-turtle:|r Usage: /pfqtest <exact unit name> <unitId> <questId> - also drops a test map pin, real IDs required")
+        return
+    end
+
+    local unitName, unitId, questId = string.match(msg, "^(.-)%s+(%d+)%s+(%d+)$")
+
+    partyQuestData["TestBuddy"] = partyQuestData["TestBuddy"] or {}
+
+    if unitName and unitId and questId then
+        unitId = tonumber(unitId)
+        questId = tonumber(questId)
+        partyQuestData["TestBuddy"][unitName] = {
+            {
+                quest = "Test Quest",
+                objective = "Kill " .. unitName,
+                current = 3,
+                total = 10,
+                questId = questId,
+                targetId = unitId,
+                targetType = "U"
+            }
+        }
+        RenderPartyQuestPins()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfQuest-turtle:|r Injected fake party progress + pin for '" .. unitName
+            .. "' (unit " .. unitId .. ", quest " .. questId .. ") from TestBuddy. Requires showPartyQuestPins enabled and unit "
+            .. unitId .. " to have known spawn coordinates.")
+    else
+        partyQuestData["TestBuddy"][msg] = {
+            {
+                quest = "Test Quest",
+                objective = "Kill " .. msg,
+                current = 3,
+                total = 10
+            }
+        }
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfQuest-turtle:|r Injected fake party progress for '" .. msg .. "' from TestBuddy. Mouseover it to check the tooltip.")
+    end
 end

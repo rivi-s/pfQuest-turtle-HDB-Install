@@ -11,6 +11,14 @@ local fontsize = 12
 local panelheight = 16
 local entryheight = 20
 
+-- The server and bundled database can use visually identical punctuation
+-- with different byte sequences (for example straight versus curly
+-- apostrophes). Use a display-independent key so one active quest cannot
+-- occupy two tracker rows through its live and database titles.
+local function TrackerTitleKey(title)
+  return string.lower(string.gsub(title or "", "[^%w]", ""))
+end
+
 local function IsQuestComplete(value)
   -- Turtle can return -1 for a failed/not-ready quest. Lua treats every
   -- number as true, so completion must be checked explicitly.
@@ -250,7 +258,7 @@ tracker:SetClampedToScreen(true)
 -- differs from route.coords: a tracker sort must include objectives even when
 -- their route line, arrow, cluster, or endpoint display is disabled.
 function tracker.RegisterQuestPoint(title, node, x, y)
-  local id = tracker.buttonByTitle[title]
+  local id = tracker.buttonByTitle[TrackerTitleKey(title)]
   local button = id and tracker.buttons[id]
   if not button or button.empty then return end
 
@@ -849,12 +857,12 @@ function tracker.DoLayout()
     -- Sorting moves frame objects between numeric slots. Rebuild the reverse
     -- lookup so later updates address the frame that now owns each title.
     for title in pairs(tracker.buttonByTitle) do
-      tracker.buttonByTitle[title] = nil
+      tracker.buttonByTitle[TrackerTitleKey(title)] = nil
     end
     for id = 1, getn(tracker.buttons) do
       local button = tracker.buttons[id]
       if button and not button.empty and button.title then
-        tracker.buttonByTitle[button.title] = id
+        tracker.buttonByTitle[TrackerTitleKey(button.title)] = id
       end
     end
   end
@@ -960,7 +968,7 @@ function tracker.ButtonAdd(title, node)
   local id
 
   -- O(1) duplicate check via reverse map (replaces linear scan of tracker.buttons)
-  local existing = tracker.buttonByTitle[title]
+  local existing = tracker.buttonByTitle[TrackerTitleKey(title)]
   if existing then
     local button = tracker.buttons[existing]
     if node.dummy or not node.texture then
@@ -1029,7 +1037,7 @@ function tracker.ButtonAdd(title, node)
   tracker.buttons[id].questid = questid
 
   -- keep reverse map in sync
-  tracker.buttonByTitle[title] = id
+  tracker.buttonByTitle[TrackerTitleKey(title)] = id
 
   -- reload button data
   tracker.ButtonEvent(tracker.buttons[id])

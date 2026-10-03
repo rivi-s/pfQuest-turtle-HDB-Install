@@ -1,9 +1,17 @@
+-- Older standard cores do not expose the optional backend boundary.
+local function HDBEnabled()
+  return pfDatabase and type(pfDatabase.IsHDBEnabled) == "function"
+    and pfDatabase:IsHDBEnabled() or false
+end
+
 -- Initialize all static variables
 local loc = GetLocale()
 local dbs = { "items", "quests", "quests-itemreq", "objects", "units", "zones", "professions", "areatrigger", "refloot" }
 local noloc = { "items", "quests", "objects", "units" }
-local hdbOwnsStaticData = pfQuestHearthDB and type(pfQuestHearthDB.GetQuestMapPinsAsync) == "function"
+local hdbOwnsStaticData = HDBEnabled()
 local hdbOwned = { items = true, quests = true, ["quests-itemreq"] = true, objects = true, units = true, refloot = true }
+local hasLuaQuestData = next(pfDB.quests.data or {}) ~= nil
+hdbOwnsStaticData = hdbOwnsStaticData and not hasLuaQuestData
 
 -- Patch databases to merge TurtleWoW data
 local function patchtable(base, diff)
@@ -80,7 +88,7 @@ local function IsReferenceToken(item, reference)
   return hasSources
 end
 
-local hdbOwnsUnitDrops = pfQuestHearthDB and type(pfQuestHearthDB.GetUnitDropsAsync) == "function"
+local hdbOwnsUnitDrops = HDBEnabled() and not hasLuaQuestData
 if not hdbOwnsUnitDrops then
   for id, reference in pairs(pfDB["refloot"]["data"]) do
     local item = pfDB["items"]["data"][id]
@@ -473,7 +481,7 @@ local function AddItemDropNodes(id, item, meta, maps, quests, items, units, obje
 end
 
 -- Item Drop System: Override SearchQuestID to show item-start quests for current quest givers
-local hdbOwnsItemStart = pfQuestHearthDB
+local hdbOwnsItemStart = HDBEnabled()
   and type(pfQuestHearthDB.GetQuestStartPinsAsync) == "function"
   and type(pfQuestHearthDB.GetQuestMapPinsAsync) == "function"
 
@@ -553,10 +561,20 @@ local function ItemDropQuestFilter(id, plevel, pclass, prace)
     else
       rank = 1
     end
-    local maximum = ({ orange = 4, yellow = 3, green = 2, gray = 1 })[levelRange]
-    if maximum and rank > maximum then return end
-  elseif quest["min"] and quest["min"] > plevel + 3 then
-    -- Preserve the prior item-start limit while Level Range is disabled.
+    local threshold = ({ red = 5, orange = 4, yellow = 3, green = 2, gray = 1 })[levelRange]
+    local direction = pfQuest_config["questpinleveldirection"] == "higher" and "higher" or "lower"
+    if threshold and direction == "lower" and rank > threshold then return end
+    if threshold and direction == "higher" and rank < threshold then return end
+  elseif quest["min"] and quest["min"] > plevel + (pfQuest_config["showhighlevel"] == "1" and 3 or 0) then
+    -- Match base pfQuest: the extra three required levels are optional.
+    return
+  end
+
+  -- Item-start quests are added after base SearchQuests and therefore must
+  -- enforce the normal low-level preference themselves. Keep this setting
+  -- authoritative in both optional Level Range directions, matching base
+  -- quest-giver filtering.
+  if quest["lvl"] and quest["lvl"] < plevel - 4 and pfQuest_config["showlowlevel"] == "0" then
     return
   end
 

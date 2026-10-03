@@ -1,3 +1,9 @@
+-- Older standard cores do not expose the optional backend boundary.
+local function HDBEnabled()
+  return pfDatabase and type(pfDatabase.IsHDBEnabled) == "function"
+    and pfDatabase:IsHDBEnabled() or false
+end
+
 local GRID_COLUMNS = 6
 local ICON_SIZE = 26
 local ICON_PADDING = 6
@@ -32,7 +38,7 @@ local function BuildDropsForUnit(unitid)
   local cached = unitDropsCache[unitid]
   if cached then return cached end
 
-  if not unitDropsHDBFailed[unitid] and pfQuestHearthDB
+  if not unitDropsHDBFailed[unitid] and HDBEnabled()
     and type(pfQuestHearthDB.GetUnitDropsAsync) == "function" then
     if unitDropsPending[unitid] then return nil end
     unitDropsPending[unitid] = true
