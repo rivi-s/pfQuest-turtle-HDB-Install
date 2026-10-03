@@ -1,9 +1,3 @@
--- Older standard cores do not expose the optional backend boundary.
-local function HDBEnabled()
-  return pfDatabase and type(pfDatabase.IsHDBEnabled) == "function"
-    and pfDatabase:IsHDBEnabled() or false
-end
-
 local questObjectives = {}
 local nameplateFrames = {}
 local iconFrames = {}
@@ -104,7 +98,7 @@ local function ScanQuestObjectives()
         end
     end
 
-    if HDBEnabled() and type(pfQuestHearthDB.GetQuestTargetsAsync) == "function" then
+    if pfQuestHearthDB and type(pfQuestHearthDB.GetQuestTargetsAsync) == "function" then
         local pending = 0
         for _ in pairs(activeQuests) do pending = pending + 1 end
         if pending == 0 then return unresolvedRows end

@@ -1,9 +1,3 @@
--- Older standard cores do not expose the optional backend boundary.
-local function HDBEnabled()
-  return pfDatabase and type(pfDatabase.IsHDBEnabled) == "function"
-    and pfDatabase:IsHDBEnabled() or false
-end
-
 local function ExtendPfQuestConfig()
     -- Check if already added (prevents duplicates)
     for _, entry in pairs(pfQuest_defconfig) do
@@ -144,9 +138,6 @@ postRewardRefresh:SetScript("OnUpdate", function()
         -- HDB scan of every eligible quest giver (tens of thousands of rows)
         -- 0.35s after each reward, which reads as a hitch once auto-complete
         -- chains several turn-ins back to back.
-    end
-    if pfQuest and not HDBEnabled() then
-        pfQuest.updateQuestGivers = true
     end
     if pfMap then
         pfMap.queue_update = GetTime()

@@ -158,10 +158,8 @@ pfQuest.questlog_tmp = {}
 
 -- Quest history is keyed by numeric database ID. Older HDB alpha builds could
 -- accidentally record a temporary same-title identity as a string.
-if not next(pfDB.quests.data or {}) then
-  for historyID in pairs(pfQuest_history or {}) do
-    if type(historyID) ~= "number" then pfQuest_history[historyID] = nil end
-  end
+for historyID in pairs(pfQuest_history or {}) do
+  if type(historyID) ~= "number" then pfQuest_history[historyID] = nil end
 end
 
 local function GetCanonicalQuestTitle(id)

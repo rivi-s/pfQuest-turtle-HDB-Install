@@ -1,12 +1,8 @@
 -- Native asynchronous SQLite provider used by pfQuest's HDB adapter.
-if pfQuestBackend and pfQuestBackend.provider
-  and pfQuestBackend.provider ~= "pfQuest-HearthDB-turtle" then return end
-
 local addon = CreateFrame("Frame")
 pfQuestHearthDB = {}
-local dbHandle = pfQuestBackend and pfQuestBackend.provider == "pfQuest-HearthDB-turtle"
-  and pfQuestBackend.handle or nil
-local opened = dbHandle and true or nil
+local dbHandle
+local opened
 local shuttingDown
 local questTextCache = {}
 local questTargetCache = {}
@@ -37,7 +33,6 @@ local function Available()
 end
 
 local function Open()
-  if pfQuestBackend and pfQuestBackend.mode ~= "hdb" then return nil end
   if shuttingDown then return nil end
   if opened then return dbHandle end
 
@@ -96,7 +91,6 @@ local function Close()
   if dbHandle and type(HDB_Close) == "function" then
     pcall(HDB_Close, dbHandle)
   end
-  if pfQuestBackend and pfQuestBackend.handle == dbHandle then pfQuestBackend.handle = nil end
   dbHandle = nil
   opened = nil
   ClearCache()

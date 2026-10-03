@@ -1,6 +1,6 @@
--- Optional HearthDB backend shared by the standard and HDB packages.
--- Standard downloads retain their Lua databases and use them when native
--- support is unavailable; lean HDB bundles supply data through the companion.
+-- Optional first integration for the vanilla HDB edition. It deliberately
+-- replaces only active-quest map lookup; all normal pfQuest data stays loaded
+-- and the original search remains the fallback until this path is proven.
 local compat = pfQuestCompat
 local questIdentityCache = {}
 local questIdentityUnresolved = {}
@@ -18,17 +18,8 @@ local function RefreshQuestIdentityUI()
 end
 
 local function Enabled()
-  if pfQuestBackend and pfQuestBackend.mode ~= "hdb" then return false end
-  return type(HDB_GetVersion) == "function"
-    and type(HDB_OpenAddon) == "function"
-    and type(HDB_QueryRawAsync) == "function"
-    and type(HDB_ClearPoison) == "function"
-    and type(pfQuestHearthDB) == "table"
+  return type(pfQuestHearthDB) == "table"
     and type(pfQuestHearthDB.GetQuestMapPinsAsync) == "function"
-end
-
-function pfDatabase:IsHDBEnabled()
-  return Enabled()
 end
 
 -- The browser consumes this small API instead of knowing which companion is
