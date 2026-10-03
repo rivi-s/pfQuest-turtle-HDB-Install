@@ -23,32 +23,25 @@ The shared quest, map, journal, browser, tracker, and HearthDB adapter code live
 in pfQuest-HDB. This repository contains the Turtle-specific extension and the
 tools needed to build its complete database.
 
-## Install
+## Install (embedded-provider development layout)
 
-Download the ready-to-install ZIP from the
-[Releases page](https://github.com/rivi-s/pfQuest-turtle-HDB/releases). A
-complete Turtle alpha installation has four addon folders:
+This unreleased layout embeds the HearthDB provider in the HDB addon folders.
+Existing published alpha ZIPs still use their original separate provider layout.
+Use the matching ready-to-install repository for this layout once published.
 
-```text
-Interface/AddOns/pfQuest
-Interface/AddOns/pfQuest-turtle
-Interface/AddOns/pfQuest-HearthDB-turtle
-Interface/AddOns/<your HearthDB client component>
-```
+Close the client and replace the HDB addon folders. Remove legacy
+`pfQuest-HearthDB` and `pfQuest-HearthDB-turtle` folders when upgrading.
+Do not replace character settings in `WTF`.
 
-Use `pfQuest` from the matching pfQuest-HDB release and `pfQuest-turtle` from
-this release. The Turtle provider replaces the Vanilla-only provider for this
-installation; do not load both provider addons together.
+Turtle uses `pfQuest` and `pfQuest-turtle`; vanilla uses only `pfQuest`.
 
-The packaged database belongs at:
+The SQLite database belongs at `pfQuest-turtle/provider/data/pfquest-turtle.sqlite`.
+The client still needs [HearthDB](https://github.com/copypasteonly/HearthDB)
+installed. No separate provider addon is needed. Large Lua database files remain
+outside the active load manifests; there is no Lua database fallback.
 
-```text
-pfQuest-HearthDB-turtle/data/pfquest-turtle.sqlite
-```
-
-Install [HearthDB](https://github.com/copypasteonly/HearthDB), copy the folders into `Interface/AddOns`, restart the game, and run `/pfqhdb` to
-check the provider. The addon list shows both HDB editions with a blue `[HDB]`
-label. The first alpha supports `enUS` clients only.
+Restart and run `/pfqhdb`: it reports the database-owning addon and whether the
+database opened. `/pfqhdb cacheclear` clears session query caches.
 
 ## Reporting alpha bugs
 

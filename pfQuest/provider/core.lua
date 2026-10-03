@@ -1,6 +1,12 @@
 -- Native asynchronous SQLite provider used by pfQuest's HDB adapter.
+-- Embedded providers replace the legacy separate provider addon.
+-- Turtle loads its combined database after the base addon; do not open vanilla too.
+if type(GetAddOnInfo) == "function" then
+  local name, _, _, enabled = GetAddOnInfo("pfQuest-turtle")
+  if name and (enabled == true or enabled == 1) then return end
+end
 local addon = CreateFrame("Frame")
-pfQuestHearthDB = {}
+pfQuestHearthDB = { embedded = true, databaseAddon = "pfQuest" }
 local dbHandle
 local opened
 local shuttingDown
@@ -37,13 +43,13 @@ local function Open()
   if opened then return dbHandle end
 
   if not Available() then
-    Print("HearthDB is not available; companion is idle.")
+    Print("HearthDB is not available; embedded provider is idle.")
     return nil
   end
 
-  local ok, handle = pcall(HDB_OpenAddon, "pfQuest-HearthDB-turtle", "data/pfquest-turtle.sqlite")
+  local ok, handle = pcall(HDB_OpenAddon, "pfQuest", "provider/data/pfquest.sqlite")
   if not ok or not handle then
-    Print("could not open data/pfquest-turtle.sqlite")
+    Print("could not open provider/data/pfquest.sqlite")
     return nil
   end
 
@@ -1183,7 +1189,7 @@ SlashCmdList.PFQUESTHDB = function(input)
     ClearCache()
     Print("HDB query cache cleared.")
   else
-    Print("HearthDB=" .. tostring(Available()) .. ", open=" .. tostring(dbHandle ~= nil)
+    Print("addon=pfQuest HearthDB=" .. tostring(Available()) .. ", open=" .. tostring(dbHandle ~= nil)
       .. ". Use /pfqhdb cacheclear to clear query caches.")
   end
 end

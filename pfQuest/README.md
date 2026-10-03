@@ -33,30 +33,25 @@ gathering routes have all been adapted to that model.
 Other locales can use the same provider interface and database schema, but their
 database packages are planned for a later testing round.
 
-## Install
+## Install (embedded-provider development layout)
 
-Download the ready-to-install ZIP from the
-[Releases page](https://github.com/rivi-s/pfQuest-HDB/releases). A complete
-installation has two addon folders:
+This unreleased layout embeds the HearthDB provider in the HDB addon folders.
+Existing published alpha ZIPs still use their original separate provider layout.
+Use the matching ready-to-install repository for this layout once published.
 
-```text
-Interface/AddOns/pfQuest
-Interface/AddOns/pfQuest-HearthDB
-```
+Close the client and replace the HDB addon folders. Remove legacy
+`pfQuest-HearthDB` and `pfQuest-HearthDB-turtle` folders when upgrading.
+Do not replace character settings in `WTF`.
 
-The provider folder must contain the packaged database at:
+Vanilla uses only the `pfQuest` addon folder.
 
-```text
-pfQuest-HearthDB/data/pfquest.sqlite
-```
+The SQLite database belongs at `pfQuest/provider/data/pfquest.sqlite`.
+The client still needs [HearthDB](https://github.com/copypasteonly/HearthDB)
+installed. No separate provider addon is needed. Large Lua database files remain
+outside the active load manifests; there is no Lua database fallback.
 
-Install the compatible [HearthDB client component](https://github.com/copypasteonly/HearthDB), copy both addon folders into
-`Interface/AddOns`, and restart the game. Do not install regular pfQuest beside
-pfQuest-HDB because both editions use the `pfQuest` addon folder and saved
-variable names.
-
-Run `/pfqhdb` in game to see whether the provider and database opened correctly.
-Run `/pfqhdb cacheclear` to clear the provider's session caches while testing.
+Restart and run `/pfqhdb`: it reports the database-owning addon and whether the
+database opened. `/pfqhdb cacheclear` clears session query caches.
 
 ## Reporting alpha bugs
 
