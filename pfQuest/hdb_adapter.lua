@@ -874,8 +874,8 @@ function pfDatabase:FilterHDBAvailableStartPins(pins)
     if eligible and pin.prerequisites and pin.prerequisites ~= "" then
       eligible = PrerequisitesSatisfied(pin.prerequisites, pin.questID)
     end
-    if eligible and pin.skill and pin.skill ~= "" then
-      eligible = pfDatabase:GetPlayerSkillCached(pin.skill) and true or false
+    if eligible then
+      eligible = pfDatabase:MeetsQuestProfession(pin.questID, pin.skill)
     end
     if eligible then table.insert(visible, pin) end
   end
