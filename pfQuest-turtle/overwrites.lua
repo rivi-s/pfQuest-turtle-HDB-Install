@@ -457,10 +457,14 @@ pfDB.quests.preall[41286] = { 41283, 41284, 41285 }
 pfDB.quests.preall[41290] = { 41287, 41288, 41289 }
 local goldsmithQuests = pfDB.quests["data-turtle"]
 if goldsmithQuests then
-  goldsmithQuests[41286].pre = { 41283, 41284, 41285 }
-  goldsmithQuests[41286].preall = pfDB.quests.preall[41286]
-  goldsmithQuests[41290].pre = { 41287, 41288, 41289 }
-  goldsmithQuests[41290].preall = pfDB.quests.preall[41290]
-  goldsmithQuests[41291].pre = { 41286, 41290 }
+  for id, prerequisites in pairs(pfDB.quests.preall) do
+    if (id == 41286 or id == 41290) and type(goldsmithQuests[id]) == "table" then
+      goldsmithQuests[id].pre = prerequisites
+      goldsmithQuests[id].preall = prerequisites
+    end
+  end
+  if type(goldsmithQuests[41291]) == "table" then
+    goldsmithQuests[41291].pre = { 41286, 41290 }
+  end
 end
 pfDB.questProfessionRequirements[41290] = { 755, 225 }
