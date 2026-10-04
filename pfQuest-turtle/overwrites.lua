@@ -468,3 +468,9 @@ if goldsmithQuests then
   end
 end
 pfDB.questProfessionRequirements[41290] = { 755, 225 }
+
+-- The Brassbolts Brothers (2769) is an optional referral, not an acceptance
+-- requirement for Gahz'rilla. Turtle's quest template has PrevQuestId = 0.
+local gahzrilla = pfDB.quests["data-turtle"] and pfDB.quests["data-turtle"][2770]
+  or pfDB.quests.data and pfDB.quests.data[2770]
+if type(gahzrilla) == "table" then gahzrilla.pre = nil end
