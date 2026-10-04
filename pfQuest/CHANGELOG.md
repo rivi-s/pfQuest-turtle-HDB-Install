@@ -1,18 +1,20 @@
 # pfQuest base patch notes
 
+## 0.2.0-beta.1 — 2026-10-04
+
+- Fixed map and minimap tooltips staying visible after leaving a marker.
+- Added support for the optional repeatable quest display setting supplied by Turtle quest data.
+- Embedded HearthDB inside pfQuest; a separate provider addon is no longer required.
+- Protected embedded databases from leftover old provider addons.
+- Upgrade cleanup: you can delete the old pfQuest-HearthDB and pfQuest-HearthDB-turtle folders from Interface/AddOns. Keep pfQuest, pfQuest-turtle if installed, and your WTF settings. HearthDB.dll is still required.
+- Improved completion marker refresh and duplicate quest-title handling.
+- Added this changelog and one update reminder per installed version.
+
 ## 0.1.0-alpha.15 — 2026-10-02
 
 - Updated quest objectives and route arrows immediately after progress, completion, turn-in, and abandonment while the World Map is closed.
 - Restored abandoned quest markers immediately while preserving nearby completed quest markers as quest-log rows shift.
 - Improved Turtle quest-removal classification and added an optional abandon-flow diagnostic trace.
-
-## 0.1.0-alpha.14 — 2026-09-30
-
-- Restored accurate unit-tooltip counters across multi-objective kill quests and added shared-spawn creature names to HDB nodes.
-- Recognized completed item objectives from their visible counts when Turtle omits the client completion flag.
-- Recalculated routes after quest turn-in and used live Quest Log levels for route-arrow labels.
-- Added required-all prerequisite support for convergence quests such as Zanzil's Mixture and a Fool's Stout.
-- Added a shared-coordinate database index so objective markers rebuild promptly after login and reload.
 
 ## 0.1.0-alpha.13 — 2026-09-29
 

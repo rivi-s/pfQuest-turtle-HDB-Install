@@ -1,9 +1,9 @@
 ## Interface: 11200
 ## Title: |cff33ffccpf|cffffffffQuest-turtle |cff00aeff[HDB]
-## Author: Shagu
+## Author: Shagu, Rivi
 ## Contributors: Gurky, Antealis, HumbleKagu, KasVital, Haaxor1689, IcemanHHW, fatpowaranga, Bennylavaa
 ## Notes: A TurtleWoW DB extension for pfQuest
-## Version: 0.1.0-alpha.15
+## Version: 0.2.0-beta.1
 ## Dependencies: pfQuest
 ## SavedVariables: pfQuest_turtlecount
 

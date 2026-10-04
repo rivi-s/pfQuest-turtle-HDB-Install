@@ -1,9 +1,11 @@
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest", {
-{ ["version"] = "Next update - testing", ["date"] = "2026-10-03", ["notes"] = {
+{ ["version"] = "0.2.0-beta.1", ["date"] = "2026-10-04", ["notes"] = {
 "Fixed map and minimap tooltips staying visible after leaving a marker.",
+"Added support for the optional repeatable quest display setting supplied by Turtle quest data.",
 "Embedded HearthDB inside pfQuest; a separate provider addon is no longer required.",
 "Protected embedded databases from leftover old provider addons.",
+"Upgrade cleanup: you can delete the old pfQuest-HearthDB and pfQuest-HearthDB-turtle folders from Interface/AddOns. Keep pfQuest, pfQuest-turtle if installed, and your WTF settings. HearthDB.dll is still required.",
 "Improved completion marker refresh and duplicate quest-title handling.",
 "Added this changelog and one update reminder per installed version."
 } },

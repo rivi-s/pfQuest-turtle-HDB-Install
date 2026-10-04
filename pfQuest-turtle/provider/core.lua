@@ -841,7 +841,7 @@ function provider:GetQuestEligibilityAsync(id, callback)
     if callback then callback(nil, "HearthDB is unavailable or quest id is invalid") end
     return nil
   end
-  local sql = [[SELECT m.level, m.min_level, m.race_mask, m.class_mask, m.skill, m.event, p.prerequisite_id
+  local sql = [[SELECT m.level, m.min_level, m.race_mask, m.class_mask, m.skill, m.event, p.prerequisite_id, m.repeatable
     FROM quest_meta m LEFT JOIN quest_prerequisite p ON p.quest_id = m.quest_id
     WHERE m.quest_id = ]] .. id
   local ok, ticket = pcall(HDB_QueryRawAsync, handle, sql, function(columns, rows, err)
@@ -857,7 +857,7 @@ function provider:GetQuestEligibilityAsync(id, callback)
     end
     local record = {
       id = id, level = row[1], minLevel = row[2], raceMask = row[3], classMask = row[4],
-      skill = row[5], event = row[6], prerequisites = {},
+      skill = row[5], event = row[6], prerequisites = {}, repeatable = row[8] == "1",
     }
     for index = 1, table.getn(rows) do
       if rows[index][7] then table.insert(record.prerequisites, tonumber(rows[index][7])) end
@@ -891,6 +891,7 @@ function provider:GetQuestStartPinsAsync(options, callback)
   local includeLow = options.includeLow and 1 or 0
   local includeAllLevels = options.includeAllLevels and 1 or 0
   local includeEvents = options.includeEvents and 1 or 0
+  local includeRepeatable = options.includeRepeatable and 1 or 0
   local questID = math.floor(tonumber(options.questID) or 0)
   local prerequisiteID = math.floor(tonumber(options.prerequisiteID) or 0)
   local sql = [[WITH resolved_start AS (
@@ -911,7 +912,7 @@ function provider:GetQuestStartPinsAsync(options, callback)
     )
     SELECT q.quest_id, qt.title, qt.objective, qm.level, qm.min_level, qm.skill, qm.event,
       q.target_kind, q.target_id, em.level, em.faction, s.x, s.y, s.zone_id, s.respawn, e.title,
-      GROUP_CONCAT(qp.prerequisite_id), q.origin_kind, q.origin_id, q.chance, it.title
+      GROUP_CONCAT(qp.prerequisite_id), q.origin_kind, q.origin_id, q.chance, it.title, qm.repeatable
     FROM resolved_start q
     JOIN quest_text qt ON qt.id = q.quest_id AND qt.locale = ']] .. CurrentLocale() .. [['
     JOIN quest_meta qm ON qm.quest_id = q.quest_id
@@ -932,6 +933,7 @@ function provider:GetQuestStartPinsAsync(options, callback)
       AND (qm.race_mask = '' OR (CAST(qm.race_mask AS INTEGER) & ]] .. raceMask .. [[) = ]] .. raceMask .. [[)
       AND (qm.class_mask = '' OR (CAST(qm.class_mask AS INTEGER) & ]] .. classMask .. [[) = ]] .. classMask .. [[)
       AND (]] .. includeEvents .. [[ = 1 OR qm.event = '')
+      AND (]] .. includeRepeatable .. [[ = 1 OR qm.repeatable = '')
       AND (]] .. includeAllLevels .. [[ = 1 OR ]] .. includeLow .. [[ = 1 OR CAST(qm.level AS INTEGER) >= ]] .. (level - 4) .. [[)
       AND (]] .. includeAllLevels .. [[ = 1 OR CAST(qm.min_level AS INTEGER) <= ]] .. (level + highOffset) .. [[)
       AND (em.faction IS NULL OR em.faction = '' OR instr(em.faction, ']] .. faction .. [[') > 0)
@@ -952,7 +954,7 @@ function provider:GetQuestStartPinsAsync(options, callback)
         targetID = tonumber(row[9]), level = row[10], faction = row[11], x = tonumber(row[12]),
         y = tonumber(row[13]), zoneID = tonumber(row[14]), respawn = tonumber(row[15]), title = row[16],
         prerequisites = row[17], originKind = row[18], originID = tonumber(row[19]),
-        chance = tonumber(row[20]), itemTitle = row[21],
+        chance = tonumber(row[20]), itemTitle = row[21], repeatable = row[22] == "1",
       })
     end
     if callback then callback(pins, nil) end

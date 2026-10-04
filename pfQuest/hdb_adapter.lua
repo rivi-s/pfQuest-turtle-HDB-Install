@@ -841,7 +841,8 @@ function pfDatabase:FilterHDBAvailableStartPins(pins)
     local pin = pins[index]
     local eligible = pin.questID and not (pfQuest.questlog and pfQuest.questlog[pin.questID])
       and not activeTitles[pin.quest]
-      and not pfQuest_history[pin.questID]
+      and (not pfQuest_history[pin.questID] or pin.repeatable)
+      and (not pin.repeatable or pfQuest_config["showrepeatable"] == "1")
     if eligible and threshold then
       local color = pfQuestCompat.GetDifficultyColor(tonumber(pin.qlvl) or 0)
       local rank
@@ -1140,6 +1141,9 @@ local function AddAvailablePin(pin, plevel, addon)
   elseif pin.event and pin.event ~= "" then
     texture, vertex, layer = pfQuestConfig.path .. "\\img\\available", { 0.2, 0.8, 1 }, 2
   end
+  if pin.repeatable then
+    texture, vertex, layer = pfQuestConfig.path .. "\\img\\available", { 0.2, 0.8, 1 }, 2
+  end
   pfMap:AddNode({
     addon = addon or "PFQUEST", title = pin.quest, quest = pin.quest, questid = pin.questID,
     questObjective = pin.objective, qlvl = pin.qlvl, qmin = pin.qmin,
@@ -1178,6 +1182,7 @@ function pfDatabase:SearchQuestGiversHDB(meta)
     -- its color rules are applied by FilterHDBAvailableStartPins below.
     includeAllLevels = levelRange ~= "off",
     includeEvents = pfQuest_config["showfestival"] == "1",
+    includeRepeatable = pfQuest_config["showrepeatable"] == "1",
     raceMask = pfDatabase:GetBitByRace(race),
     classMask = pfDatabase:GetBitByClass(class),
     faction = faction,
@@ -1257,6 +1262,7 @@ function pfDatabase:MarkQuestAcceptedHDB(id)
         level = UnitLevel("player"),
         includeAllLevels = true,
         includeEvents = pfQuest_config["showfestival"] == "1",
+    includeRepeatable = pfQuest_config["showrepeatable"] == "1",
         raceMask = pfDatabase:GetBitByRace(race),
         classMask = pfDatabase:GetBitByClass(class),
         faction = UnitFactionGroup("player") == "Horde" and "H" or "A",
@@ -1313,6 +1319,7 @@ function pfDatabase:RefreshCompletedQuestGiversHDB(id, meta)
     includeLow = pfQuest_config["showlowlevel"] == "1",
     includeAllLevels = levelRange ~= "off",
     includeEvents = pfQuest_config["showfestival"] == "1",
+    includeRepeatable = pfQuest_config["showrepeatable"] == "1",
     raceMask = pfDatabase:GetBitByRace(race),
     classMask = pfDatabase:GetBitByClass(class),
     faction = UnitFactionGroup("player") == "Horde" and "H" or "A",
@@ -1374,6 +1381,7 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
       level = UnitLevel("player"),
       includeAllLevels = true,
       includeEvents = pfQuest_config["showfestival"] == "1",
+    includeRepeatable = pfQuest_config["showrepeatable"] == "1",
       raceMask = pfDatabase:GetBitByRace(race),
       classMask = pfDatabase:GetBitByClass(class),
       faction = UnitFactionGroup("player") == "Horde" and "H" or "A",

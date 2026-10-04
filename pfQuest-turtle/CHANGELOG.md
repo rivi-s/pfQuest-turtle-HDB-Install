@@ -1,17 +1,19 @@
 # pfQuest Turtle patch notes
 
+## 0.2.0-beta.1 — 2026-10-04
+
+- Removed an incorrect prerequisite that hid Gahz'rilla (2770) from available quest markers.
+- Added Display Repeatable Quests [Beta] beneath the event/daily option, off by default. Known repeatable offers use blue exclamation marks and retain existing quest requirements. Coverage and accept/turn-in refresh are still being tested; please report missing quests with their name and ID.
+- Fixed map and minimap tooltips staying visible after leaving a marker.
+- Added profession skill requirements and corrected faction-specific Goldsmithing prerequisites.
+- Embedded the combined Turtle database and guarded missing quest records during startup.
+- Added this changelog and one update reminder per installed version.
+
 ## 0.1.0-alpha.15 — 2026-10-02
 
 - Reduced party quest synchronization work to prevent group joins and quest turn-ins from stuttering.
 - Enabled automatic acceptance and turn-in for newer Turtle report quests with objective-free hand-ins.
 - Corrected More Silk for the Wounded to start from Hara'ne and added her verified Moonwhisper Coast location.
-- Rebuilt and validated the packaged Turtle HearthDB database.
-
-## 0.1.0-alpha.14 — 2026-09-30
-
-- Added Aliattan's Campfire as the event starter for The Black Waltz and corrected Spitecrest Decursions to level 47.
-- Added calibrated continent projections for Lapidis Isle, Gillijim's Isle, and Tel'Abim.
-- Replaced Moonwhisper Coast's rough continent placement with its client-derived projection.
 - Rebuilt and validated the packaged Turtle HearthDB database.
 
 ## 0.1.0-alpha.13 — 2026-09-29

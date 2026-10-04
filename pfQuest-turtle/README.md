@@ -81,3 +81,9 @@ detail.
 pfQuest-turtle extends [pfQuest](https://github.com/shagu/pfQuest) with Turtle
 WoW support. This HDB edition follows the live pfQuest-turtle history and keeps
 Turtle-specific behavior here while shared behavior remains in pfQuest-HDB.
+
+## Author credits
+
+Original pfQuest-turtle author: Shagu. Existing contributors are listed in the addon TOC.
+
+Rivi maintains this fork and contributes ongoing fixes, features, quest database corrections, and HearthDB integration.
