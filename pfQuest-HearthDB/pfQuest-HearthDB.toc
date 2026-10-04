@@ -1,0 +1,6 @@
+## Interface: 11200
+## Title: pfQuest legacy provider compatibility (inactive)
+## Notes: Inert upgrade shim. HearthDB is embedded in pfQuest now.
+## LoadOnDemand: 1
+## OptionalDeps: pfQuest, pfQuest-turtle
+core.lua

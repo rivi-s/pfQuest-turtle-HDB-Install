@@ -1,0 +1,1 @@
+-- Inert upgrade shim: provider runtime and data now live inside pfQuest.

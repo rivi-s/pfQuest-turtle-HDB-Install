@@ -1,7 +1,7 @@
 -- Native asynchronous SQLite provider used by pfQuest's HDB adapter.
 -- Embedded providers replace the legacy separate provider addon.
 local addon = CreateFrame("Frame")
-pfQuestHearthDB = { embedded = true, databaseAddon = "pfQuest-turtle" }
+local provider = { embedded = true, databaseAddon = "pfQuest-turtle" }
 local dbHandle
 local opened
 local shuttingDown
@@ -97,7 +97,7 @@ local function Close()
   ClearCache()
 end
 
-function pfQuestHearthDB:SearchEntityTitlesAsync(kind, query, limit, callback)
+function provider:SearchEntityTitlesAsync(kind, query, limit, callback)
   local handle = Open()
   query, limit = tostring(query or ""), tonumber(limit) or 50
   if not handle or (kind ~= "U" and kind ~= "O") or query == "" then
@@ -143,7 +143,7 @@ function pfQuestHearthDB:SearchEntityTitlesAsync(kind, query, limit, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetEntitiesByTitleAsync(kind, title, callback)
+function provider:GetEntitiesByTitleAsync(kind, title, callback)
   local handle = Open()
   if not handle or (kind ~= "U" and kind ~= "O") or not title or title == "" then
     if callback then callback(nil, "HearthDB is unavailable or entity title is invalid") end
@@ -191,7 +191,7 @@ function pfQuestHearthDB:GetEntitiesByTitleAsync(kind, title, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetMetaRelationAsync(relation, callback)
+function provider:GetMetaRelationAsync(relation, callback)
   local handle = Open()
   if not handle or not relation then if callback then callback(nil, "HearthDB is unavailable") end return nil end
   local safe = string.gsub(relation, "'", "''")
@@ -208,7 +208,7 @@ function pfQuestHearthDB:GetMetaRelationAsync(relation, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetEntityInfoAsync(kind, id, callback)
+function provider:GetEntityInfoAsync(kind, id, callback)
   local handle = Open()
   id = tonumber(id)
   if not handle or (kind ~= "U" and kind ~= "O") or not id then
@@ -255,7 +255,7 @@ end
 -- browser needs partial matches, while map rendering needs exact duplicate
 -- title handling. Keeping both APIs prevents an accidental broad query in a
 -- map refresh.
-function pfQuestHearthDB:SearchItemTitlesAsync(query, limit, callback)
+function provider:SearchItemTitlesAsync(query, limit, callback)
   local handle = Open()
   query, limit = tostring(query or ""), tonumber(limit) or 50
   if not handle or query == "" then
@@ -303,7 +303,7 @@ function pfQuestHearthDB:SearchItemTitlesAsync(query, limit, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetItemIDsByTitleAsync(title, callback)
+function provider:GetItemIDsByTitleAsync(title, callback)
   local handle = Open()
   title = tostring(title or "")
   if not handle or title == "" then
@@ -339,7 +339,7 @@ function pfQuestHearthDB:GetItemIDsByTitleAsync(title, callback)
   return ticket
 end
 
-function pfQuestHearthDB:SearchQuestTitlesAsync(query, limit, callback)
+function provider:SearchQuestTitlesAsync(query, limit, callback)
   local handle = Open()
   query = tostring(query or "")
   limit = tonumber(limit) or 50
@@ -398,7 +398,7 @@ function pfQuestHearthDB:SearchQuestTitlesAsync(query, limit, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetQuestTextAsync(id, callback)
+function provider:GetQuestTextAsync(id, callback)
   local handle = Open()
   id = tonumber(id)
   if not handle or not id then
@@ -438,7 +438,7 @@ function pfQuestHearthDB:GetQuestTextAsync(id, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetQuestIDsByTitleAsync(title, callback)
+function provider:GetQuestIDsByTitleAsync(title, callback)
   local handle = Open()
   if not handle or not title or title == "" then
     if callback then callback(nil, "HearthDB is unavailable or title is invalid") end
@@ -471,7 +471,7 @@ function pfQuestHearthDB:GetQuestIDsByTitleAsync(title, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetQuestTextByTitleAsync(title, callback)
+function provider:GetQuestTextByTitleAsync(title, callback)
   local handle = Open()
   if not handle or not title or title == "" then
     if callback then callback(nil, "HearthDB is unavailable or title is invalid") end
@@ -508,16 +508,16 @@ function pfQuestHearthDB:GetQuestTextByTitleAsync(title, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetCachedQuestIDsByTitle(title)
+function provider:GetCachedQuestIDsByTitle(title)
   if not title or title == "" then return nil, questTitleIDPreloaded end
   return questTitleIDCache["enUS:title-id:" .. string.lower(title)], questTitleIDPreloaded
 end
 
-function pfQuestHearthDB:GetCachedQuestTitleByID(id)
+function provider:GetCachedQuestTitleByID(id)
   return questTitleByIDCache[tonumber(id)], questTitleIDPreloaded
 end
 
-function pfQuestHearthDB:PreloadQuestTitleIDsAsync(callback)
+function provider:PreloadQuestTitleIDsAsync(callback)
   local handle = Open()
   if not handle then
     if callback then callback(nil, "HearthDB is unavailable") end
@@ -568,7 +568,7 @@ function pfQuestHearthDB:PreloadQuestTitleIDsAsync(callback)
   return firstTicket
 end
 
-function pfQuestHearthDB:GetQuestDisambiguationAsync(title, callback)
+function provider:GetQuestDisambiguationAsync(title, callback)
   local handle = Open()
   title = tostring(title or "")
   if not handle or title == "" then
@@ -623,7 +623,7 @@ end
 
 -- Turtle WoW uses the enUS client. Warm the small same-title candidate set in
 -- the background at login so the first stage normally needs no SQLite trip.
-function pfQuestHearthDB:PreloadQuestDisambiguationAsync(callback)
+function provider:PreloadQuestDisambiguationAsync(callback)
   local handle = Open()
   if not handle then
     if callback then callback(nil, "HearthDB is unavailable") end
@@ -693,7 +693,7 @@ function pfQuestHearthDB:PreloadQuestDisambiguationAsync(callback)
   return firstTicket
 end
 
-function pfQuestHearthDB:GetItemSourcesAsync(id, callback)
+function provider:GetItemSourcesAsync(id, callback)
   local handle = Open()
   id = tonumber(id)
   if not handle or not id then
@@ -801,7 +801,7 @@ function pfQuestHearthDB:GetItemSourcesAsync(id, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetUnitDropsAsync(unitID, callback)
+function provider:GetUnitDropsAsync(unitID, callback)
   local handle = Open()
   unitID = tonumber(unitID)
   if not handle or not unitID then
@@ -834,7 +834,7 @@ function pfQuestHearthDB:GetUnitDropsAsync(unitID, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetQuestEligibilityAsync(id, callback)
+function provider:GetQuestEligibilityAsync(id, callback)
   local handle = Open()
   id = tonumber(id)
   if not handle or not id then
@@ -876,7 +876,7 @@ end
 -- Native provider boundary for the available-quest-giver phase. It applies
 -- stable eligibility predicates in SQLite; the addon will later apply history,
 -- prerequisites, and profession checks before it renders any results.
-function pfQuestHearthDB:GetQuestStartPinsAsync(options, callback)
+function provider:GetQuestStartPinsAsync(options, callback)
   local handle = Open()
   options = options or {}
   if not handle then
@@ -964,7 +964,7 @@ function pfQuestHearthDB:GetQuestStartPinsAsync(options, callback)
   return ticket
 end
 
-function pfQuestHearthDB:GetQuestTargetsAsync(id, callback, limit)
+function provider:GetQuestTargetsAsync(id, callback, limit)
   local handle = Open()
   id = tonumber(id)
   if not handle or not id then
@@ -1086,7 +1086,7 @@ end
 
 -- Resolve the quest-log Show destination without materializing every objective
 -- pin. Direct enders win over starters, matching the legacy Lua-table lookup.
-function pfQuestHearthDB:GetQuestHubMapAsync(id, callback)
+function provider:GetQuestHubMapAsync(id, callback)
   local handle = Open()
   id = math.floor(tonumber(id) or 0)
   if not handle or id <= 0 then
@@ -1121,7 +1121,7 @@ end
 -- Public provider boundary for a future vanilla pfQuest-HDB edition. It owns
 -- the asynchronous lookup and returns only map-ready records, so consumers do
 -- not need to know about SQLite rows, item source expansion, or cache keys.
-function pfQuestHearthDB:GetQuestMapPinsAsync(id, callback, limit)
+function provider:GetQuestMapPinsAsync(id, callback, limit)
   id = tonumber(id)
   if not id then
     if callback then callback(nil, "quest id is invalid") end
@@ -1196,7 +1196,13 @@ addon:SetScript("OnEvent", function()
     Close()
   else
     Open()
-    pfQuestHearthDB:PreloadQuestTitleIDsAsync()
-    pfQuestHearthDB:PreloadQuestDisambiguationAsync()
+    provider:PreloadQuestTitleIDsAsync()
+    provider:PreloadQuestDisambiguationAsync()
   end
 end)
+
+if pfQuestHDBCompat then
+  pfQuestHDBCompat:RegisterProvider(provider, SlashCmdList.PFQUESTHDB)
+else
+  pfQuestHearthDB = provider
+end
