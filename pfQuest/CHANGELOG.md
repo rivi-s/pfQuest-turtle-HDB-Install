@@ -1,5 +1,9 @@
 # pfQuest base patch notes
 
+## 0.2.0-beta.2 — 2026-10-05
+
+- Fixed quest-marker tooltip ownership checks on Vanilla clients without GetOwner.
+
 ## 0.2.0-beta.1 — 2026-10-04
 
 - Fixed map and minimap tooltips staying visible after leaving a marker.

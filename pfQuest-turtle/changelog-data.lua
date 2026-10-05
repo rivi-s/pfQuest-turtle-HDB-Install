@@ -2,6 +2,13 @@
 if not pfQuestChangelog then return end
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest-turtle", {
+{ ["version"] = "0.2.0-beta.2", ["date"] = "2026-10-05", ["notes"] = {
+"Restored missing quest objectives and item-use markers, including the Serpent Statue, Elemental Cores, Dark Iron Aggression, Tricolored Hide-ra and Rite of Resurrection.",
+"Corrected 11 item-use links that targeted creatures instead of gameobjects.",
+"Added 34 verified Garrison Armory spawn points for Q40428.",
+"Rebuilt the packaged Turtle HearthDB database.",
+"Legacy pfQuest-HearthDB and pfQuest-HearthDB-turtle folders can be deleted; HearthDB.dll is still required."
+} },
 { ["version"] = "0.2.0-beta.1", ["date"] = "2026-10-04", ["notes"] = {
 "Removed an incorrect prerequisite that hid Gahz'rilla (2770) from available quest markers.",
 "Added Display Repeatable Quests [Beta] beneath the event/daily option, off by default. Known repeatable offers use blue exclamation marks and retain existing quest requirements. Coverage and accept/turn-in refresh are still being tested; please report missing quests with their name and ID.",

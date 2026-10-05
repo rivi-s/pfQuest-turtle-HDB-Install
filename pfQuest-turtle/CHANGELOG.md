@@ -1,5 +1,13 @@
 # pfQuest Turtle patch notes
 
+## 0.2.0-beta.2 — 2026-10-05
+
+- Restored missing quest objectives and item-use markers, including the Serpent Statue, Elemental Cores, Dark Iron Aggression, Tricolored Hide-ra and Rite of Resurrection.
+- Corrected 11 item-use links that targeted creatures instead of gameobjects.
+- Added 34 verified Garrison Armory spawn points for Q40428.
+- Rebuilt the packaged Turtle HearthDB database.
+- Legacy pfQuest-HearthDB and pfQuest-HearthDB-turtle folders can be deleted; HearthDB.dll is still required.
+
 ## 0.2.0-beta.1 — 2026-10-04
 
 - Removed an incorrect prerequisite that hid Gahz'rilla (2770) from available quest markers.

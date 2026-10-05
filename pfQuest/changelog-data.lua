@@ -1,5 +1,8 @@
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest", {
+{ ["version"] = "0.2.0-beta.2", ["date"] = "2026-10-05", ["notes"] = {
+"Fixed quest-marker tooltip ownership checks on Vanilla clients without GetOwner."
+} },
 { ["version"] = "0.2.0-beta.1", ["date"] = "2026-10-04", ["notes"] = {
 "Fixed map and minimap tooltips staying visible after leaving a marker.",
 "Added support for the optional repeatable quest display setting supplied by Turtle quest data.",
