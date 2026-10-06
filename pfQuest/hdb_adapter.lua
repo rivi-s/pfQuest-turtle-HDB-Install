@@ -1223,11 +1223,13 @@ function pfDatabase:SearchQuestGiversHDB(meta)
       end
     end
     local plevel = UnitLevel("player")
+    local refreshAppearance = self.hdbQuestGiverLevel ~= plevel
     for id, list in pairs(byQuest) do
-      if not hdbQuestGiverSet[id] then
+      if refreshAppearance or not hdbQuestGiverSet[id] then
         for index = 1, table.getn(list) do AddAvailablePin(list[index], plevel, meta and meta.addon) end
       end
     end
+    self.hdbQuestGiverLevel = plevel
     for id, qlogid in pairs(rebuild) do
       local activeMeta = { addon = "PFQUEST", qlogid = qlogid }
       if not pfDatabase:SearchQuestIDHDB(id, activeMeta) then
