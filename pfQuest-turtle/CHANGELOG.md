@@ -1,5 +1,9 @@
 # pfQuest Turtle patch notes
 
+## Install/source update — 2026-10-06 (no new release)
+
+- Initialized tree object icon lookup when absent, preserving Lua/HDB shared tracking compatibility.
+
 ## 0.2.0-beta.2 — 2026-10-05
 
 - Restored missing quest objectives and item-use markers, including the Serpent Statue, Elemental Cores, Dark Iron Aggression, Tricolored Hide-ra and Rite of Resurrection.

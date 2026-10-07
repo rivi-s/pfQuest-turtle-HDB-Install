@@ -1,5 +1,10 @@
 # pfQuest base patch notes
 
+## Install/source update — 2026-10-06 (no new release)
+
+- Coalesced tracker row objective reads outside quest-event dispatch, matching the confirmed non-HDB login-stall fix.
+- Quest-log button refreshes now read the current mapping instead of repeatedly resolving native quest links.
+
 ## 0.2.0-beta.2 — 2026-10-05
 
 - Fixed quest-marker tooltip ownership checks on Vanilla clients without GetOwner.
