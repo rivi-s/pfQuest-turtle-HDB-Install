@@ -1,5 +1,11 @@
 # pfQuest Turtle patch notes
 
+## Git update (0.2.0-beta.2) — 2026-10-08
+
+- Improved dense continent-map performance and made Purple Lotus continent pins sparser, preserving zone-map and minimap coverage.
+- Added Q40141 letter deliveries to Karl and Samual with corrected talk/progress links.
+- Added Q5216 summoned key-source location and rebuilt packaged Turtle HearthDB data.
+
 ## Install/source update — 2026-10-06 (no new release)
 
 - Initialized tree object icon lookup when absent, preserving Lua/HDB shared tracking compatibility.

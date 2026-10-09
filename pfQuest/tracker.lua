@@ -33,6 +33,9 @@ end
 
 local function IsKnownObjectiveFreeQuest(questid, title)
   questid = ResolveUniqueStaticQuestID(questid, title)
+  if pfDB.quests.requireClientCompletion and pfDB.quests.requireClientCompletion[questid] then
+    return false
+  end
   local hdb = type(questid) == "number" and pfQuest.hdbActiveQuestCache
     and pfQuest.hdbActiveQuestCache[questid]
   if hdb and hdb.hasObjectives ~= nil then return not hdb.hasObjectives end
@@ -47,11 +50,16 @@ local function IsKnownObjectiveFreeQuest(questid, title)
 end
 
 local function IsQuestLogReady(qlogid, complete, questid, title)
+  local resolvedID = ResolveUniqueStaticQuestID(questid, title)
+  if pfDB.quests.requireClientCompletion and pfDB.quests.requireClientCompletion[resolvedID] then
+    return IsQuestComplete(complete)
+  end
   if IsKnownObjectiveFreeQuest(questid, title) then return true end
   local objectives = GetNumQuestLeaderBoards(qlogid)
   if objectives and objectives > 0 then
     for i = 1, objectives do
-      local _, _, done = compat.GetQuestLogLeaderBoard(i, qlogid)
+      local text, kind, done = compat.GetQuestLogLeaderBoard(i, qlogid)
+      text, kind, done = pfDatabase:NormalizeQuestItemObjective(resolvedID, text, kind, done)
       if not done then return false end
     end
     return true
@@ -64,6 +72,14 @@ end
 local questHeaderByTitle = {}
 
 local function ReadQuestLogVisibility()
+  -- Collapsed rows can be omitted on login. Retain learned tab membership
+  -- in the existing per-character config without expanding the quest log.
+  if pfQuest_config then
+    local saved = pfQuest_config.trackerQuestHeaders
+    if type(saved) ~= "table" then saved = {}; pfQuest_config.trackerQuestHeaders = saved end
+    for title, header in pairs(questHeaderByTitle) do saved[title] = header end
+    questHeaderByTitle = saved
+  end
   local visible, explicitlyHidden, signature = {}, {}, {}
   local currentHeader
   local hidden, hasCollapsed = false, false
@@ -603,6 +619,7 @@ function tracker.ButtonClick()
   elseif IsControlKeyDown() and pfQuest_config["spawncolors"] == "0" then
     -- switch color
     pfQuest_colors[this.title] = { pfMap.str2rgb(this.title .. GetTime()) }
+    pfMap:RefreshPinColor(this.title)
     pfMap:UpdateNodes()
   elseif expand_states[this.title] == 0 then
     expand_states[this.title] = 1
@@ -731,6 +748,7 @@ function tracker.ButtonEvent(self)
       -- populate cache and compute progress in one pass
       for i = 1, objectives, 1 do
         local text, type, done = compat.GetQuestLogLeaderBoard(i, qlogid)
+        text, type, done = pfDatabase:NormalizeQuestItemObjective(qid, text, type, done)
         board_cache[i] = { text, type, done }
         if not done then allObjectivesDone = false end
         local _, _, obj, objNum, objNeeded = strfind(gsub(text, "\239\188\154", ":"), "(.*):%s*([%d]+)%s*/%s*([%d]+)")
@@ -759,6 +777,10 @@ function tracker.ButtonEvent(self)
         and not IsKnownObjectiveFreeQuest(qid, title) and type(qid) == "number" then
       tracker.completedActive[qid] = nil
       ready = false
+    end
+    if pfDB.quests.requireClientCompletion and pfDB.quests.requireClientCompletion[qid] then
+      tracker.completedActive[qid] = nil
+      ready = IsQuestComplete(complete)
     end
     if ready and type(qid) == "number" then tracker.completedActive[qid] = true end
     if ready then
@@ -851,7 +873,7 @@ function tracker.ButtonEvent(self)
   tracker.needsSort = true
   tracker:ScheduleLayout()
   if tracker.mode == "QUEST_TRACKING"
-      and not IsQuestTrackerEntryVisible(title, self.questid, tracker.visibleQuests, tracker.completedActive) then
+      and not IsQuestTrackerEntryVisible(title, self.questid, tracker.visibleQuests, tracker.completedActive, tracker.explicitlyHidden) then
     self:Hide()
   else
     self:Show()
@@ -859,7 +881,20 @@ function tracker.ButtonEvent(self)
 end
 
 -- Separate function for layout (only called when needed)
+function tracker.FlushNodeContent()
+  if not tracker.deferNodeContent then return end
+  tracker.deferNodeContent = nil
+  for _, button in pairs(tracker.buttons or {}) do
+    if button.contentPending and not button.empty then
+      button.contentPending = nil
+      tracker.ButtonEvent(button)
+      tracker.ButtonUpdate(button)
+    end
+  end
+end
+
 function tracker.DoLayout()
+  tracker.FlushNodeContent()
   -- Sort all tracker entries if needed
   if tracker.needsSort then
     sort(tracker.buttons, trackersort)
@@ -886,6 +921,7 @@ function tracker.DoLayout()
     visibleQuests, signature, explicitlyHidden = ReadQuestLogVisibility()
   end
   tracker.visibleQuests = visibleQuests
+  tracker.explicitlyHidden = explicitlyHidden
 
   -- resize window and align buttons
   local height = panelheight
@@ -1050,9 +1086,14 @@ function tracker.ButtonAdd(title, node)
   -- keep reverse map in sync
   tracker.buttonByTitle[TrackerTitleKey(title)] = id
 
-  -- reload button data
-  tracker.ButtonEvent(tracker.buttons[id])
-  tracker.ButtonUpdate(tracker.buttons[id])
+  -- Many spawn nodes share one tracker row. During a map pass, bind the
+  -- final node now but read objective/bag state only once at layout time.
+  if tracker.deferNodeContent then
+    tracker.buttons[id].contentPending = true
+  else
+    tracker.ButtonEvent(tracker.buttons[id])
+    tracker.ButtonUpdate(tracker.buttons[id])
+  end
 end
 
 function tracker.Reset()

@@ -7,6 +7,29 @@ local opened
 local shuttingDown
 local questTextCache = {}
 local questTargetCache = {}
+local targetDecodeJobs = {}
+local targetDecodeGeneration = 0
+local targetDecodeDriver = CreateFrame("Frame", "pfQuestHDBResultDecoder")
+targetDecodeDriver:SetScript("OnUpdate", function()
+  local job = targetDecodeJobs[1]
+  if not job then
+    if pfQuestHDBWork then pfQuestHDBWork:Release("decode") end
+    targetDecodeDriver:Hide()
+    return
+  end
+  if pfQuestHDBWork and not pfQuestHDBWork:Claim("decode") then return end
+  if job() then table.remove(targetDecodeJobs, 1) end
+  if not targetDecodeJobs[1] then
+    if pfQuestHDBWork then pfQuestHDBWork:Release("decode") end
+    targetDecodeDriver:Hide()
+  end
+end)
+targetDecodeDriver:Hide()
+provider.targetDecodeDriver = targetDecodeDriver
+local function QueueTargetDecode(job)
+  table.insert(targetDecodeJobs, job)
+  targetDecodeDriver:Show()
+end
 local questMapPinCache = {}
 local questSearchCache = {}
 local questTitleIDCache = {}
@@ -66,6 +89,7 @@ local function CacheKey(id, limit)
 end
 
 local function ClearCache()
+  targetDecodeGeneration = targetDecodeGeneration + 1
   questTextCache = {}
   questTargetCache = {}
   questMapPinCache = {}
@@ -877,8 +901,33 @@ end
 -- stable eligibility predicates in SQLite; the addon will later apply history,
 -- prerequisites, and profession checks before it renders any results.
 function provider:GetQuestStartPinsAsync(options, callback)
-  local handle = Open()
   options = options or {}
+  if options.deliveryBatch then
+    local pageSize = math.max(64, math.min(512, math.floor(tonumber(options.deliveryBatch) or 512)))
+    local accumulated, finished = {}, false
+    local function SubmitPage(offset)
+      local page = {}
+      for key, value in pairs(options) do page[key] = value end
+      page.deliveryBatch, page.deliveryLimit, page.deliveryOffset = nil, pageSize, offset
+      return self:GetQuestStartPinsAsync(page, function(pins, err)
+        if finished then return end
+        if err or not pins then
+          finished = true
+          if callback then callback(nil, err or "starter page missing") end
+          return
+        end
+        for index = 1, table.getn(pins) do table.insert(accumulated, pins[index]) end
+        if table.getn(pins) == pageSize then
+          SubmitPage(offset + pageSize)
+        else
+          finished = true
+          if callback then callback(accumulated, nil) end
+        end
+      end)
+    end
+    return SubmitPage(0)
+  end
+  local handle = Open()
   if not handle then
     if callback then callback(nil, "HearthDB is unavailable") end
     return nil
@@ -939,14 +988,26 @@ function provider:GetQuestStartPinsAsync(options, callback)
       AND (em.faction IS NULL OR em.faction = '' OR instr(em.faction, ']] .. faction .. [[') > 0)
     GROUP BY q.quest_id, q.target_kind, q.target_id, q.origin_kind, q.origin_id,
       q.chance, s.x, s.y, s.zone_id, s.respawn]]
+  if options.deliveryLimit then
+    sql = sql .. " ORDER BY q.quest_id, q.target_kind, q.target_id, q.origin_kind, q.origin_id, q.chance, s.x, s.y, s.zone_id, s.respawn"
+      .. " LIMIT " .. math.floor(options.deliveryLimit) .. " OFFSET " .. math.floor(options.deliveryOffset or 0)
+  end
   local ok, ticket = pcall(HDB_QueryRawAsync, handle, sql, function(columns, rows, err)
     if err then
       HDB_ClearPoison(handle)
       if callback then callback(nil, err) end
       return
     end
-    local pins = {}
-    for index = 1, table.getn(rows or {}) do
+    local pins, index = {}, 1
+    local count = table.getn(rows or {})
+    local generation = targetDecodeGeneration
+    local function DecodeStarterBatch()
+      if generation ~= targetDecodeGeneration then
+        if callback then callback(nil, "database changed during starter decode") end
+        return true
+      end
+      local last = math.min(index + 31, count)
+      for index = index, last do
       local row = rows[index]
       table.insert(pins, {
         questID = tonumber(row[1]), quest = row[2], objective = row[3], qlvl = tonumber(row[4]) or 0,
@@ -956,8 +1017,18 @@ function provider:GetQuestStartPinsAsync(options, callback)
         prerequisites = row[17], originKind = row[18], originID = tonumber(row[19]),
         chance = tonumber(row[20]), itemTitle = row[21], repeatable = row[22] == "1",
       })
+      end
+      index = last + 1
+      if index <= count then return false end
+      if callback then
+        if type(provider.profileDecodedCallback) == "function" then
+          provider.profileDecodedCallback("starter completion", callback, pins)
+        else callback(pins, nil) end
+      end
+      return true
     end
-    if callback then callback(pins, nil) end
+    if count > 32 then QueueTargetDecode(DecodeStarterBatch)
+    else DecodeStarterBatch() end
   end)
   if not ok or not ticket then
     if callback then callback(nil, "could not submit start-pin query") end
@@ -1032,7 +1103,7 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
           AND objective_q.quest_id = q.quest_id
           AND objective_q.phase = 'obj'
           AND objective_q.target_kind IN ('U', 'O')
-          AND objective_q.target_id <> q.target_id) AS related_objective_titles
+          AND objective_q.target_id <> q.target_id) AS related_objective_titles, em.faction
     FROM resolved_target q
     LEFT JOIN spawn s ON s.target_kind = q.target_kind AND s.target_id = q.target_id
     LEFT JOIN areatrigger_spawn a ON q.target_kind = 'A' AND a.trigger_id = q.target_id
@@ -1054,12 +1125,20 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
       return
     end
 
-    local records = {}
-    for index = 1, table.getn(rows or {}) do
+    local records, index = {}, 1
+    local count = table.getn(rows or {})
+    local generation = targetDecodeGeneration
+    local function DecodeBatch()
+      if generation ~= targetDecodeGeneration then
+        if callback then callback(nil, "database cache changed during target decode") end
+        return true
+      end
+      local last = math.min(index + 31, count)
+      for index = index, last do
       local row = rows[index]
-      local sharedSpawns = {}
+      local sharedSpawns = row[16] and row[16] ~= "" and {} or nil
       for title in string.gfind(row[16] or "", "[^|]+") do sharedSpawns[title] = true end
-      local relatedObjectives = {}
+      local relatedObjectives = row[17] and row[17] ~= "" and {} or nil
       for title in string.gfind(row[17] or "", "[^|]+") do relatedObjectives[title] = true end
       table.insert(records, {
         phase = row[1],
@@ -1069,15 +1148,25 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
         originID = tonumber(row[5]),
         chance = tonumber(row[6]),
         sourceKind = row[7], level = row[8],
-        rank = row[9], x = tonumber(row[10]),
+        rank = row[9], faction = row[18], x = tonumber(row[10]),
         y = tonumber(row[11]), zoneID = tonumber(row[12]),
         respawn = tonumber(row[13]), title = row[14], itemTitle = row[15],
-        sharedSpawns = next(sharedSpawns) and sharedSpawns or nil,
-        relatedObjectives = next(relatedObjectives) and relatedObjectives or nil,
+        sharedSpawns = sharedSpawns,
+        relatedObjectives = relatedObjectives,
       })
+      end
+      index = last + 1
+      if index <= count then return false end
+      questTargetCache[cacheKey] = records
+      if callback then
+        if type(provider.profileDecodedCallback) == "function" then
+          provider.profileDecodedCallback("target completion", callback, records)
+        else callback(records, nil) end
+      end
+      return true
     end
-    questTargetCache[cacheKey] = records
-    if callback then callback(records, nil) end
+    if count > 32 then QueueTargetDecode(DecodeBatch)
+    else DecodeBatch() end
   end)
   if not ok or not ticket then
     if callback then callback(nil, "could not submit target query") end
@@ -1154,23 +1243,10 @@ function provider:GetQuestMapPinsAsync(id, callback, limit)
         local row = records[index]
         if row.phase == "obj" then result.hasObjectives = true end
         if row.zoneID and row.x and row.y then
-          table.insert(result.pins, {
-            phase = row.phase,
-            targetKind = row.targetKind,
-            targetID = row.targetID,
-            originKind = row.originKind,
-            originID = row.originID,
-            chance = row.chance,
-            level = row.level,
-            zoneID = row.zoneID,
-            x = row.x,
-            y = row.y,
-            respawn = row.respawn,
-            title = row.title or (row.targetKind .. " " .. row.targetID),
-            itemTitle = row.itemTitle,
-            sharedSpawns = row.sharedSpawns,
-            relatedObjectives = row.relatedObjectives,
-          })
+          -- Cached target records already contain the complete pin metadata.
+          -- Share them instead of allocating a second table for every spawn.
+          row.title = row.title or (row.targetKind .. " " .. row.targetID)
+          table.insert(result.pins, row)
         end
       end
       questMapPinCache[cacheKey] = result

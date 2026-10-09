@@ -1,5 +1,16 @@
 # pfQuest base patch notes
 
+## Git update (0.2.0-beta.2) — 2026-10-08
+
+- Reduced dense-quest acceptance and login stalls with batched processing, fewer temporary allocations, and coordinated background workers.
+- Coalesced repeated tracker reads across spawn points, substantially reducing full-log map update stalls.
+- Restored background zone-map preparation and corrected tracker Ctrl-click pin colors.
+- Fixed missing fresh-character objective markers and split item stacks briefly restoring completed objective pins.
+- Fixed unfinished pylon tracker percentages, instant turn-in availability, and collapsed tracker sections after reload.
+- Background decoder and pin-render workers stop when idle.
+- Small dense-log startup pauses remain under investigation, especially around memory cleanup.
+- Use the companion pfExtend update for gradual loading of its full HDB quest index.
+
 ## Install/source update — 2026-10-06 (no new release)
 
 - Coalesced tracker row objective reads outside quest-event dispatch, matching the confirmed non-HDB login-stall fix.

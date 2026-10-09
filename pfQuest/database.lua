@@ -314,6 +314,7 @@ end
 
 pfDatabase.itemlist:RegisterEvent("BAG_UPDATE")
 pfDatabase.itemlist:SetScript("OnEvent", function()
+  pfDatabase.questItemsSettleAt = GetTime() + 0.25
   -- only set the deadline on the first event in a burst
   if not this.pending then
     this.update = GetTime() + 0.5
@@ -388,6 +389,9 @@ pfDatabase.itemlist:SetScript("OnUpdate", function()
     end
   end
 
+  if pfDatabase.RefreshCarriedQuestObjectivesHDB then
+    pfDatabase:RefreshCarriedQuestObjectivesHDB()
+  end
   this:Hide()
 end)
 
@@ -629,7 +633,11 @@ local function CountCarriedItem(itemID)
     local slots = GetContainerNumSlots(bag) or 0
     for slot = 1, slots do
       local link = GetContainerItemLink(bag, slot)
-      local _, _, linkedID = link and strfind(link, "item:(%d+)")
+      local linkedID
+      if link then
+        local _, _, parsedID = strfind(link, "item:(%d+)")
+        linkedID = parsedID
+      end
       if linkedID and tonumber(linkedID) == itemID then
         local _, count = GetContainerItemInfo(bag, slot)
         total = total + (count or 1)
@@ -637,6 +645,18 @@ local function CountCarriedItem(itemID)
     end
   end
   return total
+end
+
+-- Correct clients that report just one stack for a collect objective.
+function pfDatabase:NormalizeQuestItemObjective(questid, text, kind, done)
+  if kind ~= "item" or not text then return text, kind, done end
+  local _, _, name, current, needed = strfind(text, "(.*):%s*(%d+)%s*/%s*(%d+)")
+  local record = pfQuest and pfQuest.hdbActiveQuestCache and pfQuest.hdbActiveQuestCache[questid]
+  local itemID = record and record.itemIDsByName and record.itemIDsByName[name]
+  if not itemID or not needed then return text, kind, done end
+  local carried = CountCarriedItem(itemID)
+  local required = tonumber(needed)
+  return string.format("%s: %d/%d", name, math.min(carried, required), required), kind, carried >= required
 end
 
 -- Small public snapshot used by the optional HDB active-quest adapter. The
@@ -668,7 +688,12 @@ function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
   local allDone = true
   for index = 1, objectives do
     local text, kind, done = compat.GetQuestLogLeaderBoard(index, qlogid)
+    text, kind, done = self:NormalizeQuestItemObjective(identity and identity.id, text, kind, done)
     local objectiveDone = done and true or false
+    local talk = identity and pfDB.quests.talkObjectives and pfDB.quests.talkObjectives[identity.id]
+    for unitID, row in pairs(talk or {}) do
+      if row == index then states.U[unitID] = objectiveDone and "DONE" or "PROG" end
+    end
     if kind == "monster" then
       local name, current, needed = pfUI.api.cmatch(text, QUEST_MONSTERS_KILLED)
       local state = ((current and needed and current + 0 >= needed + 0) or done) and "DONE" or "PROG"
@@ -695,12 +720,17 @@ function pfDatabase:GetQuestObjectiveStates(qlogid, identity)
       if name then
         local matched
         local itemIDs = {}
+        local knownID = identity and identity.itemIDsByName and identity.itemIDsByName[name]
+        if knownID then
+          itemIDs[knownID], matched = true, true
+        else
         for pinIndex = 1, table.getn(identity and identity.pins or {}) do
           local pin = identity.pins[pinIndex]
           if pin.originKind == "I" and pin.itemTitle == name and pin.originID then
             itemIDs[pin.originID] = true
             matched = true
           end
+        end
         end
         if not matched then itemIDs = pfDatabase:GetIDByName(name, "items") end
         for id in pairs(itemIDs) do
@@ -805,7 +835,14 @@ function pfDatabase:BuildQuestDescription(meta)
       (meta.quest or UNKNOWN)
     )
   elseif meta.QTYPE == "UNIT_OBJECTIVE" then
-    if pfDatabase:IsFriendly(meta.spawnid) then
+    local talk = pfDB.quests.talkObjectives and pfDB.quests.talkObjectives[meta.questid]
+    if talk and talk[meta.spawnid] then
+      return string.format(pfQuest_Loc["Talk to |cff33ffcc%s|r"], (meta.spawn or UNKNOWN))
+    end
+    local playerFaction = UnitFactionGroup("player")
+    local factionCode = playerFaction == "Alliance" and "A" or playerFaction == "Horde" and "H"
+    local friendly = meta.spawnfaction and factionCode and string.find(meta.spawnfaction, factionCode)
+    if friendly or pfDatabase:IsFriendly(meta.spawnid) then
       return string.format(pfQuest_Loc["Talk to |cff33ffcc%s|r"], (meta.spawn or UNKNOWN))
     else
       return string.format(pfQuest_Loc["Kill |cff33ffcc%s|r"], (meta.spawn or UNKNOWN))
@@ -1722,6 +1759,11 @@ function pfDatabase:SearchQuestID(id, meta, maps)
     if objectives then
       for i = 1, objectives, 1 do
         local text, type, done = compat.GetQuestLogLeaderBoard(i, meta["qlogid"])
+
+        local talk = pfDB.quests.talkObjectives and pfDB.quests.talkObjectives[id]
+        for unitID, row in pairs(talk or {}) do
+          if row == i then parse_obj.U[unitID] = done and "DONE" or "PROG" end
+        end
 
         -- spawn data
         if type == "monster" then

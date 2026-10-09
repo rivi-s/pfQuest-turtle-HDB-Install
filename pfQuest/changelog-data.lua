@@ -1,5 +1,15 @@
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest", {
+{ ["version"] = "Git update (0.2.0-beta.2)", ["date"] = "2026-10-08", ["notes"] = {
+"Reduced dense-quest acceptance and login stalls with batched processing, fewer temporary allocations, and coordinated background workers.",
+"Coalesced repeated tracker reads across spawn points, substantially reducing full-log map update stalls.",
+"Restored background zone-map preparation and corrected tracker Ctrl-click pin colors.",
+"Fixed missing fresh-character objective markers and split item stacks briefly restoring completed objective pins.",
+"Fixed unfinished pylon tracker percentages, instant turn-in availability, and collapsed tracker sections after reload.",
+"Background decoder and pin-render workers stop when idle.",
+"Small dense-log startup pauses remain under investigation, especially around memory cleanup.",
+"Use the companion pfExtend update for gradual loading of its full HDB quest index."
+} },
 { ["version"] = "0.2.0-beta.2", ["date"] = "2026-10-05", ["notes"] = {
 "Fixed quest-marker tooltip ownership checks on Vanilla clients without GetOwner."
 } },

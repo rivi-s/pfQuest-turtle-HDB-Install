@@ -1,3 +1,25 @@
+-- One background batch per frame, shared fairly by the HDB consumers.
+-- GetTime is fixed for a rendered frame in the client; no GC controls used.
+pfQuestHDBWork = { keys = { "decode", "pins", "map", "extend" }, waiting = {}, cursor = 0 }
+function pfQuestHDBWork:Release(key) self.waiting[key] = nil end
+function pfQuestHDBWork:Claim(key)
+  self.waiting[key] = true
+  local now = GetTime()
+  if self.at ~= now then
+    self.at, self.used, self.selected = now, nil, nil
+    for offset = 1, table.getn(self.keys) do
+      local index = math.mod(self.cursor + offset - 1, table.getn(self.keys)) + 1
+      if self.waiting[self.keys[index]] then
+        self.cursor, self.selected = index, self.keys[index]
+        break
+      end
+    end
+  end
+  if self.used or self.selected ~= key then return false end
+  self.used = true
+  return true
+end
+
 -- Optional first integration for the vanilla HDB edition. It deliberately
 -- replaces only active-quest map lookup; all normal pfQuest data stays loaded
 -- and the original search remains the fallback until this path is proven.
@@ -564,6 +586,7 @@ function pfDatabase:SearchQuestPreviewHDB(id, meta, callback)
         nodeMeta.qlvl, nodeMeta.qmin = record.level, record.minLevel
         nodeMeta.title = record.title
         nodeMeta.spawn, nodeMeta.spawnid = pin.title, pin.targetID
+        nodeMeta.spawnfaction = pin.faction
         nodeMeta.zone, nodeMeta.x, nodeMeta.y = pin.zoneID, pin.x, pin.y
         nodeMeta.level = pin.level or UNKNOWN
         nodeMeta.respawn = pin.respawn and SecondsToTime(pin.respawn) or nil
@@ -683,10 +706,12 @@ local AddPin
 local function IndexPins(pins)
   local targets = { U = {}, O = {}, I = {}, A = {}, Z = {} }
   local spawns = { U = {}, O = {} }
+  local itemIDsByName = {}
   for index = 1, table.getn(pins or {}) do
     local pin = pins[index]
     local kind = pin.originKind or pin.targetKind
     local id = pin.originID or pin.targetID
+    if kind == "I" and id and pin.itemTitle then itemIDsByName[pin.itemTitle] = id end
     if kind and id then
       targets[kind] = targets[kind] or {}
       targets[kind][id] = true
@@ -696,7 +721,7 @@ local function IndexPins(pins)
       spawns[pin.targetKind][pin.targetID] = true
     end
   end
-  return targets, spawns
+  return targets, spawns, itemIDsByName
 end
 
 function pfDatabase:RefreshQuestHDBState(id, qlogid)
@@ -712,7 +737,7 @@ function pfDatabase:RefreshQuestHDBState(id, qlogid)
 end
 
 function pfDatabase:StoreQuestHDBCache(id, qlogid, result)
-  local targets, spawns = IndexPins(result.pins)
+  local targets, spawns, itemIDsByName = IndexPins(result.pins)
   local _, liveLevel = compat.GetQuestLogTitle(qlogid)
   local record = {
     id = id,
@@ -725,6 +750,7 @@ function pfDatabase:StoreQuestHDBCache(id, qlogid, result)
     pins = result.pins or {},
     targets = targets,
     spawns = spawns,
+    itemIDsByName = itemIDsByName,
     loadedAt = GetTime(),
   }
   GetActiveQuestCache()[id] = record
@@ -786,22 +812,35 @@ function pfDatabase:GetQuestObjectiveHDB(id)
   return record and record.objective or nil
 end
 
--- Consumer boundary for the HDB map renderer. It consumes the cached record
--- only; it never opens SQLite or re-runs a Lua database search. `replace`
--- must be true on every live call: it clears this quest's existing PFQUEST
--- pins before re-adding only the ones still eligible, which is what actually
--- removes a pin once its objective's `states` entry flips to DONE. Skipping
--- the clear only stops new pins being added for a finished objective; it
--- leaves the stale one already on the map in place indefinitely.
-function pfDatabase:RenderQuestHDBCache(id, qlogid, replace)
-  local record = GetActiveQuestCache()[id]
-  if not record or record.qlogid ~= qlogid or not IsCurrentQuest(id, qlogid) then
-    return false
+-- Dense cached quests are materialized over frames, not inside SQL callbacks.
+local pendingPinRenders = {}
+local pinRenderDriver
+local function QuestRenderToken(record)
+  local parts = { tostring(record.complete), tostring(pfQuest_config.currentquestgivers) }
+  for kind, states in pairs(record.states or {}) do
+    for id, state in pairs(states) do table.insert(parts, kind .. tostring(id) .. state) end
   end
-  pfDatabase:RefreshQuestHDBState(id, qlogid)
-  if replace then pfMap:DeleteNode("PFQUEST", record.title) end
+  table.sort(parts)
+  return table.concat(parts, "|")
+end
+
+-- Bag moves can change client stack counts without changing item presence.
+function pfDatabase:RefreshCarriedQuestObjectivesHDB()
+  for id, record in pairs(GetActiveQuestCache()) do
+    if record.itemIDsByName and next(record.itemIDsByName) and IsCurrentQuest(id, record.qlogid) then
+      local before = QuestRenderToken(record)
+      self:RefreshQuestHDBState(id, record.qlogid)
+      if QuestRenderToken(record) ~= before then
+        self:RenderQuestHDBCache(id, record.qlogid, true)
+        pfMap.queue_update = GetTime()
+      end
+    end
+  end
+end
+
+local function RenderPinRange(id, qlogid, record, first, last)
   local states = record.states or { U = {}, O = {}, I = {} }
-  for index = 1, table.getn(record.pins) do
+  for index = first, last do
     local pin = record.pins[index]
     local origin = states[pin.originKind or pin.targetKind]
     local objectiveDone = origin and origin[pin.originID or pin.targetID] == "DONE"
@@ -819,8 +858,67 @@ function pfDatabase:RenderQuestHDBCache(id, qlogid, replace)
       AddPin(id, qlogid, record, pin, record.complete)
     end
   end
+end
+
+function pfDatabase:RenderQuestHDBCache(id, qlogid, replace)
+  local record = GetActiveQuestCache()[id]
+  if not record or record.qlogid ~= qlogid or not IsCurrentQuest(id, qlogid) then return false end
+  pfDatabase:RefreshQuestHDBState(id, qlogid)
+  local collect = record.itemIDsByName and next(record.itemIDsByName) and true or false
+  if table.getn(record.pins) <= 200 and not collect then
+    if replace then pfMap:DeleteNode("PFQUEST", record.title) end
+    RenderPinRange(id, qlogid, record, 1, table.getn(record.pins))
+    return true
+  end
+  local token = QuestRenderToken(record)
+  local pending = pendingPinRenders[id]
+  if pending and pending.record == record and pending.token == token then return true end
+  pendingPinRenders[id] = { record = record, qlogid = qlogid, token = token,
+    index = 1, replace = replace, collect = collect, readyAt = GetTime() + (collect and 0.25 or 0.1) }
+  pfDatabase.hdbPinsPending = true
+  pinRenderDriver:Show()
   return true
 end
+
+function pfDatabase:ProcessQuestPinRenderBatch()
+  if not next(pendingPinRenders) then
+    pfQuestHDBWork:Release("pins")
+    pinRenderDriver:Hide()
+    return
+  end
+  if not pfQuestHDBWork:Claim("pins") then return end
+  for id, job in pairs(pendingPinRenders) do
+    if not IsCurrentQuest(id, job.qlogid) or GetActiveQuestCache()[id] ~= job.record then
+      pendingPinRenders[id] = nil
+    elseif GetTime() >= math.max(job.readyAt, job.collect and (self.questItemsSettleAt or 0) or 0) then
+      local record = job.record
+      -- Refresh after the bag move settles, not from its transient partial
+      -- stack state when the render request was originally queued.
+      if job.index == 1 and job.collect then
+        self:RefreshQuestHDBState(id, job.qlogid)
+        job.token = QuestRenderToken(record)
+      end
+      if job.index == 1 and job.replace then pfMap:DeleteNode("PFQUEST", record.title) end
+      local last = math.min(job.index + 39, table.getn(record.pins))
+      RenderPinRange(id, job.qlogid, record, job.index, last)
+      job.index = last + 1
+      if job.index > table.getn(record.pins) then
+        pendingPinRenders[id] = nil
+        pfMap.queue_update = GetTime()
+      end
+      break -- at most40 source pins globally per rendered frame
+    end
+  end
+  self.hdbPinsPending = next(pendingPinRenders) and true or nil
+  if not self.hdbPinsPending then
+    pfQuestHDBWork:Release("pins")
+    pinRenderDriver:Hide()
+  end
+end
+pinRenderDriver = CreateFrame("Frame", "pfQuestHDBPinRenderDriver", UIParent)
+pinRenderDriver:SetScript("OnUpdate", function() pfDatabase:ProcessQuestPinRenderBatch() end)
+pinRenderDriver:Hide()
+pfDatabase.pinRenderDriver = pinRenderDriver
 
 -- Applies the dynamic player state that cannot be stored in the companion:
 -- active quests, completed history, prerequisite chains, and professions.
@@ -967,6 +1065,7 @@ AddPin = function(id, qlogid, quest, pin, complete)
     level = pin.level or UNKNOWN,
     spawn = spawn,
     spawnid = pin.targetID,
+    spawnfaction = pin.faction,
     spawntype = spawntype,
     zone = pin.zoneID,
     x = pin.x,
@@ -976,6 +1075,7 @@ AddPin = function(id, qlogid, quest, pin, complete)
     sellcount = pin.sourceKind == "V" and pin.chance or nil,
     texture = texture,
     item = item,
+    itemid = pin.originKind == "I" and pin.originID or nil,
     itemreq = pin.originKind == "IR" and (pin.itemTitle or pfDB.items.loc[pin.originID]) or nil,
     sharedspawns = pin.sharedSpawns,
     relatedobjectives = pin.relatedObjectives,

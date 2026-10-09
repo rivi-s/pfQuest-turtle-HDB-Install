@@ -153,6 +153,7 @@ pfQuest.queueCount = 0 -- Track queue size to avoid O(n) tsize() calls
 pfQuest.abandon = ""
 pfQuest.abandonID = nil
 pfQuest.turnedInQuestIDs = {}
+pfQuest.pendingTurnInGivers = {}
 pfQuest.questlog = {}
 pfQuest.questlog_tmp = {}
 
@@ -210,6 +211,7 @@ pfQuest:SetScript("OnEvent", function()
     if questid then
       pfQuest.turnedInQuestIDs[questid] = true
       pfQuest_history[questid] = { time(), UnitLevel("player") }
+      pfQuest.pendingTurnInGivers[questid] = true
       if pfJournal then pfJournal.dirty = true end
     end
   elseif event == "QUEST_REMOVED" then
@@ -391,6 +393,16 @@ pfQuest:SetScript("OnUpdate", function()
   end
 
   if pfQuest.queueCount == 0 then
+    -- Instant turn-ins may never appear in either quest-log snapshot, so
+    -- refresh their availability even when no REMOVE entry was generated.
+    for questID in pairs(this.pendingTurnInGivers) do
+      this.pendingTurnInGivers[questID] = nil
+      if type(pfDatabase.RefreshCompletedQuestGiversHDB) ~= "function"
+        or not pfDatabase:RefreshCompletedQuestGiversHDB(questID, { addon = "PFQUEST" }) then
+        this.updateQuestGivers = true
+      end
+      break
+    end
     return
   end
 
@@ -465,6 +477,7 @@ pfQuest:SetScript("OnUpdate", function()
         -- The single cached quest was restored without scanning every giver.
       elseif not abandoned and type(pfDatabase.RefreshCompletedQuestGiversHDB) == "function"
         and pfDatabase:RefreshCompletedQuestGiversHDB(entry[2], { addon = "PFQUEST" }) then
+        this.pendingTurnInGivers[tonumber(entry[2]) or entry[2]] = nil
         -- Only direct follow-ups can become newly eligible after this turn-in.
       else
         -- Keep the complete eligibility refresh as the compatibility fallback.
