@@ -34,12 +34,22 @@ function changelog:BuildText()
   return table.concat(lines, "\n")
 end
 
+-- Git/install updates may publish new notes without a release-version bump.
+-- An optional update ID distinguishes those updates while preserving old keys.
+function changelog:GetUpdateKey(addon)
+  local version = GetAddOnMetadata(addon, "Version")
+  if not version or version == "" then return nil end
+  local key = (self.edition or "lua") .. ":" .. addon .. ":" .. version
+  local latest = self.sources[addon] and self.sources[addon][1]
+  if latest and latest.update then key = key .. ":update:" .. latest.update end
+  return key
+end
+
 function changelog:HasUnread()
   local read = pfQuest_global and pfQuest_global.changelogRead or {}
   for addon in pairs(self.sources) do
-    local version = GetAddOnMetadata(addon, "Version")
-    if version and version ~= "" then
-      local key = (self.edition or "lua") .. ":" .. addon .. ":" .. version
+    local key = self:GetUpdateKey(addon)
+    if key then
       if not read[key] then return true end
     end
   end
@@ -56,9 +66,8 @@ function changelog:MarkRead()
   pfQuest_global = pfQuest_global or {}
   pfQuest_global.changelogRead = pfQuest_global.changelogRead or {}
   for addon in pairs(self.sources) do
-    local version = GetAddOnMetadata(addon, "Version")
-    if version and version ~= "" then
-      local key = (self.edition or "lua") .. ":" .. addon .. ":" .. version
+    local key = self:GetUpdateKey(addon)
+    if key then
       pfQuest_global.changelogRead[key] = true
     end
   end
@@ -70,9 +79,8 @@ function changelog:Announce()
   pfQuest_global.changelogSeen = pfQuest_global.changelogSeen or {}
   local seen, updated = pfQuest_global.changelogSeen, false
   for addon in pairs(self.sources) do
-    local version = GetAddOnMetadata(addon, "Version")
-    if version and version ~= "" then
-      local key = (self.edition or "lua") .. ":" .. addon .. ":" .. version
+    local key = self:GetUpdateKey(addon)
+    if key then
       if not seen[key] then seen[key], updated = true, true end
     end
   end

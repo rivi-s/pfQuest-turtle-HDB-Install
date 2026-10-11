@@ -177,6 +177,7 @@ local function ShowTooltip()
 end
 
 local expand_states = {}
+local manual_expand_states = {}
 
 -- Ported from pfQuest-2: level-first remains the default, with an optional
 -- nearest-objective order selected from the tracker header.
@@ -623,9 +624,11 @@ function tracker.ButtonClick()
     pfMap:UpdateNodes()
   elseif expand_states[this.title] == 0 then
     expand_states[this.title] = 1
+    manual_expand_states[this.title] = true
     tracker.ButtonEvent(this)
   elseif expand_states[this.title] == 1 then
     expand_states[this.title] = 0
+    manual_expand_states[this.title] = true
     tracker.ButtonEvent(this)
   end
 end
@@ -891,6 +894,42 @@ function tracker.FlushNodeContent()
       tracker.ButtonUpdate(button)
     end
   end
+end
+
+-- Apply tracker presentation once, outside quest-event dispatch. Rows retain
+-- their bindings; changing appearance never reloads quest or map data.
+function tracker.ApplyAppearance(changes)
+  if changes.trackerfontsize then
+    local requested = tonumber(pfQuest_config.trackerfontsize)
+    fontsize = requested and requested > 0 and requested or 12
+    entryheight = ceil(fontsize * 1.6)
+  end
+  if changes.trackerexpand then
+    local expanded = pfQuest_config.trackerexpand == "1" and 1 or 0
+    for title in pairs(expand_states) do
+      if not manual_expand_states[title] then expand_states[title] = expanded end
+    end
+  end
+  local refreshContent = changes.trackerfontsize or changes.trackerlevel or changes.trackerexpand
+  for _, button in pairs(tracker.buttons or {}) do
+    if not button.empty and button.title then
+      if changes.trackerfontsize then
+        button.text:SetFont(pfUI.font_default, fontsize)
+        for index, objective in pairs(button.objectives or {}) do
+          objective:SetFont(pfUI.font_default, fontsize)
+          objective:ClearAllPoints()
+          objective:SetPoint("TOPLEFT", button, "TOPLEFT", 20, -fontsize * index - 6)
+          objective:SetPoint("TOPRIGHT", button, "TOPRIGHT", -10, -fontsize * index - 6)
+        end
+      end
+      if refreshContent then
+        button.contentPending = nil
+        tracker.ButtonEvent(button)
+      end
+      tracker.ButtonUpdate(button)
+    end
+  end
+  tracker.DoLayout()
 end
 
 function tracker.DoLayout()

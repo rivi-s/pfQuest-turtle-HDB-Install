@@ -1365,6 +1365,8 @@ function pfDatabase:TrackMeta(list, state)
 
   local maps = nil
 
+  -- Cancel native deliveries and partial batches before deleting old nodes.
+  if pfDatabase.CancelHDBTracking then pfDatabase:CancelHDBTracking(identifier) end
   -- hide previous tracks
   pfQuest_track[list] = nil
   pfMap:DeleteNode(identifier)

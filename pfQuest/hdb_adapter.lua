@@ -1,6 +1,6 @@
 -- One background batch per frame, shared fairly by the HDB consumers.
 -- GetTime is fixed for a rendered frame in the client; no GC controls used.
-pfQuestHDBWork = { keys = { "decode", "pins", "map", "extend" }, waiting = {}, cursor = 0 }
+pfQuestHDBWork = { keys = { "decode", "pins", "map", "extend", "tracking", "starters" }, waiting = {}, cursor = 0 }
 function pfQuestHDBWork:Release(key) self.waiting[key] = nil end
 function pfQuestHDBWork:Claim(key)
   self.waiting[key] = true
@@ -816,7 +816,7 @@ end
 local pendingPinRenders = {}
 local pinRenderDriver
 local function QuestRenderToken(record)
-  local parts = { tostring(record.complete), tostring(pfQuest_config.currentquestgivers) }
+  local parts = { tostring(record.complete), tostring(pfQuest_config.currentquestgivers), tostring(pfQuest_config.mindropchance) }
   for kind, states in pairs(record.states or {}) do
     for id, state in pairs(states) do table.insert(parts, kind .. tostring(id) .. state) end
   end
@@ -851,7 +851,13 @@ local function RenderPinRange(id, qlogid, record, first, last)
     local requirementReady = not requirement
       or (pfDatabase.itemlist and pfDatabase.itemlist.db and pfDatabase.itemlist.db[requirement])
     if requirement then pfDatabase:TrackQuestItemDependency(requirement, id) end
-    if ((pin.phase == "end" and pfQuest_config["currentquestgivers"] == "1")
+    -- Unknown/zero chances can represent scripted acquisition. Only known
+    -- positive loot chances are restricted; vendor availability is separate.
+    local minChance = tonumber(pfQuest_config.mindropchance) or 0
+    local chance = tonumber(pin.chance)
+    local chanceOK = pin.originKind ~= "I" or pin.sourceKind == "V" or not chance
+      or chance <= 0 or chance >= minChance
+    if chanceOK and ((pin.phase == "end" and pfQuest_config["currentquestgivers"] == "1")
       or (pin.phase == "obj" and not record.complete and not objectiveDone))
       and requirementReady
     then
@@ -1167,6 +1173,11 @@ local hdbQuestGiverSet = {}
 local hdbQuestGiverPins = {}
 local hdbQuestGiverRequest = 0
 
+-- Cancel old deliveries while preserving the previous set for delta removal.
+function pfDatabase:InvalidateHDBQuestGiverRequest()
+  hdbQuestGiverRequest = hdbQuestGiverRequest + 1
+end
+
 function pfDatabase:ClearHDBQuestGiverCache()
   for id in pairs(hdbQuestGiverSet) do hdbQuestGiverSet[id] = nil end
   for id in pairs(hdbQuestGiverPins) do hdbQuestGiverPins[id] = nil end
@@ -1261,6 +1272,105 @@ local function AddAvailablePin(pin, plevel, addon)
   })
 end
 
+-- Available starters have their own bounded completion worker. Grouping by
+-- quest preserves item-source collapse even when its rows cross batch boundaries.
+local starterJob
+local starterDriver = CreateFrame("Frame", "pfQuestHDBStarterDriver", UIParent)
+starterDriver:Hide()
+pfDatabase.starterDriver = starterDriver
+local function StopStarterJob()
+  starterJob = nil
+  starterDriver:Hide()
+  if pfQuestHDBWork then pfQuestHDBWork:Release("starters") end
+end
+starterDriver:SetScript("OnUpdate", function()
+  local job = starterJob
+  if not job then StopStarterJob() return end
+  if job.request ~= hdbQuestGiverRequest then StopStarterJob() return end
+  if pfQuestHDBWork and not pfQuestHDBWork:Claim("starters") then return end
+  if job.phase == "group" then
+    local last = math.min(job.index + 127, table.getn(job.pins))
+    for index = job.index, last do
+      local pin = job.pins[index]
+      local list = job.grouped[pin.questID]
+      if not list then
+        list = {}
+        job.grouped[pin.questID] = list
+        table.insert(job.order, pin.questID)
+      end
+      table.insert(list, pin)
+    end
+    job.index = last + 1
+    if job.index > table.getn(job.pins) then
+      job.pins = nil
+      job.phase, job.index = "prepare", 1
+    end
+  elseif job.phase == "prepare" then
+    local last = math.min(job.index + 3, table.getn(job.order))
+    for index = job.index, last do
+      local id = job.order[index]
+      local pins = job.grouped[id]
+      hdbQuestGiverPins[id] = CollapseHDBItemStartPins(pins)
+      local visible = CollapseHDBItemStartPins(pfDatabase:FilterHDBAvailableStartPins(pins))
+      job.grouped[id] = nil
+      if visible[1] then
+        job.current[id] = visible[1].quest
+        job.visible[id] = visible
+      end
+    end
+    job.index = last + 1
+    if job.index > table.getn(job.order) then
+      job.remove = {}
+      for id in pairs(hdbQuestGiverSet) do
+        if not job.current[id] then table.insert(job.remove, id) end
+      end
+      job.phase, job.index = "remove", 1
+    end
+  elseif job.phase == "remove" then
+    local last = math.min(job.index + 7, table.getn(job.remove))
+    for index = job.index, last do
+      local id = job.remove[index]
+      local title = hdbQuestGiverSet[id]
+      if title then pfMap:DeleteNode("PFQUEST", title) end
+      hdbQuestGiverSet[id] = nil
+      local active = pfQuest.questlog and pfQuest.questlog[id]
+      if active and active.qlogid then
+        local meta = { addon = "PFQUEST", qlogid = active.qlogid }
+        if not pfDatabase:SearchQuestIDHDB(id, meta) then pfDatabase:SearchQuestID(id, meta) end
+      end
+    end
+    job.index = last + 1
+    pfMap.queue_update = GetTime()
+    if job.index > table.getn(job.remove) then job.phase, job.index, job.pinIndex = "add", 1, 1 end
+  else
+    local budget = 32
+    while budget > 0 and job.index <= table.getn(job.order) do
+      local id = job.order[job.index]
+      local pins = job.visible[id]
+      if pins and (job.refreshAppearance or not hdbQuestGiverSet[id] or job.pinIndex > 1) then
+        -- Acceptance/turn-in can occur between batches; do not restore stale availability.
+        if not pfDatabase:FilterHDBAvailableStartPins({pins[job.pinIndex]})[1] then
+          job.index, job.pinIndex = job.index + 1, 1
+          budget = budget - 1
+        else
+          AddAvailablePin(pins[job.pinIndex], job.level, job.addon)
+          hdbQuestGiverSet[id] = pins[job.pinIndex].quest
+          job.pinIndex, budget = job.pinIndex + 1, budget - 1
+          if job.pinIndex > table.getn(pins) then job.index, job.pinIndex = job.index + 1, 1 end
+        end
+      else
+        job.index, job.pinIndex = job.index + 1, 1
+        budget = budget - 1
+      end
+    end
+    pfMap.queue_update = GetTime()
+    if job.index > table.getn(job.order) then
+      pfDatabase.hdbQuestGiverLevel = job.level
+      StopStarterJob()
+    end
+  end
+end)
+
 -- Returns true only after the native request was accepted. Nodes remain intact
 -- while the query is in flight, so a provider failure never leaves the map empty.
 function pfDatabase:SearchQuestGiversHDB(meta)
@@ -1290,55 +1400,14 @@ function pfDatabase:SearchQuestGiversHDB(meta)
   local accepted = pfQuestHearthDB:GetQuestStartPinsAsync(options, function(pins, err)
     if request ~= hdbQuestGiverRequest or err or not pins then return end
     pfDatabase:BuildSkillCache()
-    -- Retain starter pins even for quests filtered out because they are
-    -- currently active. Turtle players can reload with a quest in progress
-    -- and then abandon it; keeping this internal cache lets that starter
-    -- return synchronously instead of waiting for another SQLite request.
-    local cachedByQuest = {}
-    local cachedPins = CollapseHDBItemStartPins(pins)
-    for index = 1, table.getn(cachedPins) do
-      local pin = cachedPins[index]
-      cachedByQuest[pin.questID] = cachedByQuest[pin.questID] or {}
-      table.insert(cachedByQuest[pin.questID], pin)
-    end
-    local visible = CollapseHDBItemStartPins(pfDatabase:FilterHDBAvailableStartPins(pins))
-    local current, byQuest = {}, {}
-    for index = 1, table.getn(visible) do
-      local pin = visible[index]
-      current[pin.questID] = pin.quest
-      byQuest[pin.questID] = byQuest[pin.questID] or {}
-      table.insert(byQuest[pin.questID], pin)
-    end
-
-    for id in pairs(hdbQuestGiverPins) do hdbQuestGiverPins[id] = nil end
-    for id, list in pairs(cachedByQuest) do hdbQuestGiverPins[id] = list end
-
-    local rebuild = {}
-    for id in pairs(hdbQuestGiverSet) do
-      if not current[id] then
-        local title = hdbQuestGiverSet[id] or (pfDB.quests.loc[id] and pfDB.quests.loc[id].T)
-        if title then pfMap:DeleteNode("PFQUEST", title) end
-        local active = pfQuest.questlog and pfQuest.questlog[id]
-        if active and active.qlogid then rebuild[id] = active.qlogid end
-      end
-    end
-    local plevel = UnitLevel("player")
-    local refreshAppearance = self.hdbQuestGiverLevel ~= plevel
-    for id, list in pairs(byQuest) do
-      if refreshAppearance or not hdbQuestGiverSet[id] then
-        for index = 1, table.getn(list) do AddAvailablePin(list[index], plevel, meta and meta.addon) end
-      end
-    end
-    self.hdbQuestGiverLevel = plevel
-    for id, qlogid in pairs(rebuild) do
-      local activeMeta = { addon = "PFQUEST", qlogid = qlogid }
-      if not pfDatabase:SearchQuestIDHDB(id, activeMeta) then
-        pfDatabase:SearchQuestID(id, activeMeta)
-      end
-    end
-    for id in pairs(hdbQuestGiverSet) do hdbQuestGiverSet[id] = nil end
-    for id, title in pairs(current) do hdbQuestGiverSet[id] = title end
-    pfMap.queue_update = GetTime()
+    StopStarterJob()
+    local level = UnitLevel("player")
+    starterJob = {
+      request = request, pins = pins, grouped = {}, order = {}, current = {}, visible = {},
+      phase = "group", index = 1, level = level, addon = meta and meta.addon,
+      refreshAppearance = pfDatabase.hdbQuestGiverLevel ~= level,
+    }
+    starterDriver:Show()
   end)
   return accepted and true or false
 end
@@ -1510,45 +1579,100 @@ function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
   return false
 end
 
+local trackingJobs, trackingGenerations = {}, {}
+local trackingDriver = CreateFrame("Frame", "pfQuestHDBTrackingDriver", UIParent)
+trackingDriver:Hide()
+pfDatabase.trackingDriver = trackingDriver
+function pfDatabase:CancelHDBTracking(identifier)
+  trackingGenerations[identifier] = (trackingGenerations[identifier] or 0) + 1
+  trackingJobs[identifier] = nil
+  if not next(trackingJobs) then
+    trackingDriver:Hide()
+    pfQuestHDBWork:Release("tracking")
+  end
+end
+function pfDatabase:ProcessHDBTrackingBatch()
+  if not next(trackingJobs) then
+    trackingDriver:Hide()
+    pfQuestHDBWork:Release("tracking")
+    return
+  end
+  if not pfQuestHDBWork:Claim("tracking") then return end
+  for identifier, job in pairs(trackingJobs) do
+    if job.generation ~= trackingGenerations[identifier] then
+      trackingJobs[identifier] = nil
+    else
+      local rows, resultIcons = job.rows, job.resultIcons
+      local maps, faction, query, meta, relation = job.maps, job.faction, job.query, job.meta, job.relation
+      local last = math.min(job.index + (job.phase == "icons" and 127 or 63), table.getn(rows))
+      if job.phase == "icons" then
+        for i=job.index,last do local r=rows[i]
+          local icon = pfDatabase.iconsByID[r.kind .. r.id]
+          if icon and r.title then resultIcons[r.title] = icon end
+        end
+
+      else
+        for i=job.index,last do local r=rows[i]
+          local skillRelations = pfDatabase.metaSkillRelations or {}
+          local skill = skillRelations[relation]
+          local pass = (not skill or (not query.min or tonumber(r.value)>=tonumber(query.min)) and (not query.max or tonumber(r.value)<=tonumber(query.max)))
+          if not skill then pass = string.find(r.value or "", faction) and true or false end
+          if pass and r.zoneID and r.x and r.y then
+            local n={} for k,v in pairs(meta or {}) do n[k]=v end
+            n.tracking=true;n.spawn=r.title or UNKNOWN;n.spawnid=r.id;n.title=n.quest or n.item or n.spawn
+            local skillCaption = pfDatabase.metaSkillCaptions and pfDatabase.metaSkillCaptions[relation]
+            n.level = (skillCaption and string.format("%s [%s]", r.value, skillCaption))
+              or (relation == "herbs" and string.format("%s [%s]", r.value, pfQuest_Loc["Herbalism"]))
+              or (relation == "mines" and string.format("%s [%s]", r.value, pfQuest_Loc["Mining"]))
+              or r.level or UNKNOWN
+            n.spawntype=r.kind=="O" and pfQuest_Loc["Object"] or pfQuest_Loc["Unit"]
+            if pfQuest_config.trackingicons ~= "0" then
+              n.icon = pfDatabase.iconsByID[r.kind .. r.id] or resultIcons[n.spawn] or pfDatabase.icons[n.spawn] or n.icon
+        else
+              n.icon, n.fade_range = nil, nil
+            end
+            if n.icon and skill then n.fade_range = 85 elseif n.icon then n.fade_range = 10 end
+            n.zone=r.zoneID;n.x=r.x;n.y=r.y;n.respawn=r.respawn and r.respawn > 0 and SecondsToTime(r.respawn) or pfQuest_Loc["N/A"]
+            maps[r.zoneID]=(maps[r.zoneID] or 0)+1;pfMap:AddNode(n)
+          end end
+
+        pfMap.queue_update = GetTime()
+      end
+      job.index = last + 1
+      if job.index > table.getn(rows) then
+        if job.phase == "icons" then job.phase, job.index = "pins", 1
+        else
+          trackingJobs[identifier] = nil
+          if job.callback then job.callback(maps) end
+        end
+      end
+      break
+    end
+  end
+  if not next(trackingJobs) then
+    trackingDriver:Hide()
+    pfQuestHDBWork:Release("tracking")
+  end
+end
+trackingDriver:SetScript("OnUpdate", function() pfDatabase:ProcessHDBTrackingBatch() end)
+
 function pfDatabase:SearchMetaRelationHDB(query, meta, callback)
   if not Enabled() or type(pfQuestHearthDB.GetMetaRelationAsync) ~= "function" then return false end
   local relation = query and query.name
   local aliases = { flightmaster="flight", taxi="flight", flights="flight", raremobs="rares" }
   relation = aliases[relation] or relation
+  local identifier = meta and meta.addon or ("TRACK_" .. string.upper(relation or ""))
+  self:CancelHDBTracking(identifier)
+  local generation = trackingGenerations[identifier]
+  local function IsCurrent() return generation == trackingGenerations[identifier] end
   local accepted = pfQuestHearthDB:GetMetaRelationAsync(relation, function(rows, err)
+    if not IsCurrent() then return end
     if err or not rows then if callback then callback(nil, err) end return end
-    local maps, faction = {}, query.faction or UnitFactionGroup("player")
+    local faction = query.faction or UnitFactionGroup("player")
     faction = faction == "Horde" and "H" or faction == "Alliance" and "A" or ""
-    -- Several gathering nodes have distinct object IDs but the same localized
-    -- name. The static database used to spread the canonical custom icon by
-    -- name, so rebuild that small alias map from the native result set.
-    local resultIcons = {}
-    for i=1,table.getn(rows) do local r=rows[i]
-      local icon = pfDatabase.iconsByID[r.kind .. r.id]
-      if icon and r.title then resultIcons[r.title] = icon end
-    end
-    for i=1,table.getn(rows) do local r=rows[i]
-      local skillRelations = pfDatabase.metaSkillRelations or {}
-      local skill = skillRelations[relation]
-      local pass = (not skill or (not query.min or tonumber(r.value)>=tonumber(query.min)) and (not query.max or tonumber(r.value)<=tonumber(query.max)))
-      if not skill then pass = string.find(r.value or "", faction) and true or false end
-      if pass and r.zoneID and r.x and r.y then
-        local n={} for k,v in pairs(meta or {}) do n[k]=v end
-        n.tracking=true;n.spawn=r.title or UNKNOWN;n.spawnid=r.id;n.title=n.quest or n.item or n.spawn
-        local skillCaption = pfDatabase.metaSkillCaptions and pfDatabase.metaSkillCaptions[relation]
-        n.level = (skillCaption and string.format("%s [%s]", r.value, skillCaption))
-          or (relation == "herbs" and string.format("%s [%s]", r.value, pfQuest_Loc["Herbalism"]))
-          or (relation == "mines" and string.format("%s [%s]", r.value, pfQuest_Loc["Mining"]))
-          or r.level or UNKNOWN
-        n.spawntype=r.kind=="O" and pfQuest_Loc["Object"] or pfQuest_Loc["Unit"]
-        if pfQuest_config.trackingicons ~= "0" then
-          n.icon = pfDatabase.iconsByID[r.kind .. r.id] or resultIcons[n.spawn] or pfDatabase.icons[n.spawn] or n.icon
-        end
-        if n.icon and skill then n.fade_range = 85 elseif n.icon then n.fade_range = 10 end
-        n.zone=r.zoneID;n.x=r.x;n.y=r.y;n.respawn=r.respawn and r.respawn > 0 and SecondsToTime(r.respawn) or pfQuest_Loc["N/A"]
-        maps[r.zoneID]=(maps[r.zoneID] or 0)+1;pfMap:AddNode(n)
-      end end
-    pfMap.queue_update=GetTime();if callback then callback(maps) end
-  end)
+    trackingJobs[identifier] = {rows=rows,query=query,meta=meta,callback=callback,
+      relation=relation,faction=faction,generation=generation,maps={},resultIcons={},phase="icons",index=1}
+    trackingDriver:Show()
+  end, IsCurrent)
   return accepted and true or false
 end

@@ -2,7 +2,13 @@
 if not pfQuestChangelog then return end
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest-turtle", {
-{ ["version"] = "Git update (0.2.0-beta.2)", ["date"] = "2026-10-08", ["notes"] = {
+{ ["version"] = "0.2.0-beta.3", ["date"] = "2026-10-10", ["notes"] = {
+"Quest-category filters refresh when saved; tooltips explain the repeatable-quest requirement.",
+"Party marker settings refresh cached party data and routing immediately.",
+"Loot-panel settings refresh an already open panel.",
+"Includes previously published Git-only Turtle quest-data and continent-map corrections."
+} },
+{ ["version"] = "Git update (0.2.0-beta.2)", ["date"] = "2026-10-08", ["update"] = "2026-10-08", ["notes"] = {
 "Improved dense continent-map performance and made Purple Lotus continent pins sparser, preserving zone-map and minimap coverage.",
 "Added Q40141 letter deliveries to Karl and Samual with corrected talk/progress links.",
 "Added Q5216 summoned key-source location and rebuilt packaged Turtle HearthDB data."

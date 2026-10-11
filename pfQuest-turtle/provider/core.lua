@@ -7,6 +7,7 @@ local opened
 local shuttingDown
 local questTextCache = {}
 local questTargetCache = {}
+local questTargetPending = {}
 local targetDecodeJobs = {}
 local targetDecodeGeneration = 0
 local targetDecodeDriver = CreateFrame("Frame", "pfQuestHDBResultDecoder")
@@ -215,7 +216,7 @@ function provider:GetEntitiesByTitleAsync(kind, title, callback)
   return ticket
 end
 
-function provider:GetMetaRelationAsync(relation, callback)
+function provider:GetMetaRelationAsync(relation, callback, isCurrent)
   local handle = Open()
   if not handle or not relation then if callback then callback(nil, "HearthDB is unavailable") end return nil end
   local safe = string.gsub(relation, "'", "''")
@@ -223,13 +224,49 @@ function provider:GetMetaRelationAsync(relation, callback)
     .. "LEFT JOIN entity_text e ON e.locale='" .. CurrentLocale() .. "' AND e.target_kind=r.target_kind AND e.target_id=r.target_id "
     .. "LEFT JOIN entity_meta m ON m.target_kind=r.target_kind AND m.target_id=r.target_id "
     .. "LEFT JOIN spawn s ON s.target_kind=r.target_kind AND s.target_id=r.target_id WHERE r.relation='" .. safe .. "'"
-  local ok,ticket=pcall(HDB_QueryRawAsync,handle,sql,function(_,rows,err)
-    if err then HDB_ClearPoison(handle); if callback then callback(nil,err) end return end
-    local records={} for i=1,table.getn(rows or {}) do local r=rows[i]; table.insert(records,{kind=r[1],id=tonumber(r[2]),value=r[3],title=r[4],level=r[5],zoneID=tonumber(r[6]),x=tonumber(r[7]),y=tonumber(r[8]),respawn=tonumber(r[9])}) end
-    if callback then callback(records,nil) end
-  end)
-  if not ok or not ticket then if callback then callback(nil,"could not submit tracking query") end return nil end
-  return ticket
+  -- Keep native Lua result delivery bounded; normalize each page before requesting more.
+  sql = sql .. " ORDER BY 1,2,3,4,5,6,7,8,9"
+  local records, offset, finished = {}, 0, false
+  local generation = targetDecodeGeneration
+  local SubmitPage
+  local function Fail(message)
+    if finished then return end
+    finished = true
+    if callback then callback(nil, message) end
+  end
+  SubmitPage = function()
+    if finished then return nil end
+    if isCurrent and not isCurrent() then finished = true return nil end
+    local pageSize = 256
+    local pageSQL = sql .. " LIMIT " .. pageSize .. " OFFSET " .. offset
+    local ok,ticket=pcall(HDB_QueryRawAsync,handle,pageSQL,function(_,rows,err)
+      if err then HDB_ClearPoison(handle); Fail(err); return end
+      if isCurrent and not isCurrent() then return end
+      local index = 1
+      if generation ~= targetDecodeGeneration then Fail("database cache changed during paged query") return end
+      local count = table.getn(rows or {})
+      local function DecodeTrackingBatch()
+        if generation ~= targetDecodeGeneration or (isCurrent and not isCurrent()) then return true end
+        local last = math.min(index + 127, count)
+        for i = index, last do
+          local r = rows[i]
+          table.insert(records, {kind=r[1],id=tonumber(r[2]),value=r[3],title=r[4],level=r[5],zoneID=tonumber(r[6]),x=tonumber(r[7]),y=tonumber(r[8]),respawn=tonumber(r[9])})
+        end
+        index = last + 1
+        if index <= count then return false end
+        offset = offset + count
+        if count == pageSize then SubmitPage() return true end
+        finished = true
+        if callback then callback(records, nil) end
+        return true
+      end
+      if count > 128 then QueueTargetDecode(DecodeTrackingBatch)
+      else DecodeTrackingBatch() end
+    end)
+    if not ok or not ticket then Fail("could not submit tracking query"); return nil end
+    return ticket
+  end
+  return SubmitPage()
 end
 
 function provider:GetEntityInfoAsync(kind, id, callback)
@@ -1051,6 +1088,25 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
     return true
   end
 
+  -- Repeated quest-log refreshes share one database load until it is cached.
+  local pending = questTargetPending[cacheKey]
+  if pending and pending.generation == targetDecodeGeneration then
+    if callback then table.insert(pending.callbacks, callback) end
+    return true
+  end
+  pending = { generation = targetDecodeGeneration, callbacks = {} }
+  if callback then table.insert(pending.callbacks, callback) end
+  questTargetPending[cacheKey] = pending
+  local function Complete(records, err)
+    if questTargetPending[cacheKey] == pending then questTargetPending[cacheKey] = nil end
+    local callbacks = pending.callbacks
+    pending.callbacks = {}
+    for index = 1, table.getn(callbacks) do
+      local ok, message = pcall(callbacks[index], records, err)
+      if not ok and type(geterrorhandler) == "function" then geterrorhandler()(message) end
+    end
+  end
+
   local sql = [[WITH resolved_target AS (
       -- Keep original quest links for objective semantics.
       SELECT quest_id, phase, target_kind, target_id, target_kind AS origin_kind, target_id AS origin_id, NULL AS chance,
@@ -1116,63 +1172,80 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
     LEFT JOIN zone_text zt ON q.target_kind = 'Z' AND zt.zone_id = q.target_id
       AND zt.locale = ']] .. CurrentLocale() .. [['
     WHERE q.quest_id = ]] .. id
-  if limit > 0 then sql = sql .. " LIMIT " .. limit end
 
-  local ok, ticket = pcall(HDB_QueryRawAsync, handle, sql, function(columns, rows, err)
-    if err then
-      HDB_ClearPoison(handle)
-      if callback then callback(nil, err) end
-      return
-    end
 
-    local records, index = {}, 1
-    local count = table.getn(rows or {})
-    local generation = targetDecodeGeneration
-    local function DecodeBatch()
-      if generation ~= targetDecodeGeneration then
-        if callback then callback(nil, "database cache changed during target decode") end
+  -- Keep native Lua result delivery bounded; normalize each page before requesting more.
+  sql = sql .. " ORDER BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18"
+  local records, offset, finished = {}, 0, false
+  local generation = targetDecodeGeneration
+  local SubmitPage
+  local function Fail(message)
+    if finished then return end
+    finished = true
+    Complete(nil, message)
+  end
+  SubmitPage = function()
+    if finished then return nil end
+    local pageSize = limit > 0 and math.min(512, limit - offset) or 512
+    local pageSQL = sql .. " LIMIT " .. pageSize .. " OFFSET " .. offset
+    local ok, ticket = pcall(HDB_QueryRawAsync, handle, pageSQL, function(columns, rows, err)
+      if err then
+        HDB_ClearPoison(handle)
+        Fail(err)
+        return
+      end
+
+      local index = 1
+      if generation ~= targetDecodeGeneration then Fail("database cache changed during paged query") return end
+      local count = table.getn(rows or {})
+      local function DecodeBatch()
+        if generation ~= targetDecodeGeneration then
+          Fail("database cache changed during target decode")
+          return true
+        end
+        local last = math.min(index + 31, count)
+        for index = index, last do
+        local row = rows[index]
+        local sharedSpawns = row[16] and row[16] ~= "" and {} or nil
+        for title in string.gfind(row[16] or "", "[^|]+") do sharedSpawns[title] = true end
+        local relatedObjectives = row[17] and row[17] ~= "" and {} or nil
+        for title in string.gfind(row[17] or "", "[^|]+") do relatedObjectives[title] = true end
+        table.insert(records, {
+          phase = row[1],
+          targetKind = row[2],
+          targetID = tonumber(row[3]),
+          originKind = row[4],
+          originID = tonumber(row[5]),
+          chance = tonumber(row[6]),
+          sourceKind = row[7], level = row[8],
+          rank = row[9], faction = row[18], x = tonumber(row[10]),
+          y = tonumber(row[11]), zoneID = tonumber(row[12]),
+          respawn = tonumber(row[13]), title = row[14], itemTitle = row[15],
+          sharedSpawns = sharedSpawns,
+          relatedObjectives = relatedObjectives,
+        })
+        end
+        index = last + 1
+        if index <= count then return false end
+        offset = offset + count
+        if count == pageSize and (limit <= 0 or offset < limit) then SubmitPage() return true end
+        finished = true
+        questTargetCache[cacheKey] = records
+        if type(provider.profileDecodedCallback) == "function" then
+          provider.profileDecodedCallback("target completion", Complete, records)
+        else Complete(records, nil) end
         return true
       end
-      local last = math.min(index + 31, count)
-      for index = index, last do
-      local row = rows[index]
-      local sharedSpawns = row[16] and row[16] ~= "" and {} or nil
-      for title in string.gfind(row[16] or "", "[^|]+") do sharedSpawns[title] = true end
-      local relatedObjectives = row[17] and row[17] ~= "" and {} or nil
-      for title in string.gfind(row[17] or "", "[^|]+") do relatedObjectives[title] = true end
-      table.insert(records, {
-        phase = row[1],
-        targetKind = row[2],
-        targetID = tonumber(row[3]),
-        originKind = row[4],
-        originID = tonumber(row[5]),
-        chance = tonumber(row[6]),
-        sourceKind = row[7], level = row[8],
-        rank = row[9], faction = row[18], x = tonumber(row[10]),
-        y = tonumber(row[11]), zoneID = tonumber(row[12]),
-        respawn = tonumber(row[13]), title = row[14], itemTitle = row[15],
-        sharedSpawns = sharedSpawns,
-        relatedObjectives = relatedObjectives,
-      })
-      end
-      index = last + 1
-      if index <= count then return false end
-      questTargetCache[cacheKey] = records
-      if callback then
-        if type(provider.profileDecodedCallback) == "function" then
-          provider.profileDecodedCallback("target completion", callback, records)
-        else callback(records, nil) end
-      end
-      return true
+      if count > 32 then QueueTargetDecode(DecodeBatch)
+      else DecodeBatch() end
+    end)
+    if not ok or not ticket then
+      Fail("could not submit target query")
+      return nil
     end
-    if count > 32 then QueueTargetDecode(DecodeBatch)
-    else DecodeBatch() end
-  end)
-  if not ok or not ticket then
-    if callback then callback(nil, "could not submit target query") end
-    return nil
+    return ticket
   end
-  return ticket
+  return SubmitPage()
 end
 
 -- Resolve the quest-log Show destination without materializing every objective
@@ -1233,6 +1306,10 @@ function provider:GetQuestMapPinsAsync(id, callback, limit)
     self:GetQuestTargetsAsync(id, function(records, targetErr)
       if targetErr then
         if callback then callback(nil, targetErr) end
+        return
+      end
+      if questMapPinCache[cacheKey] then
+        if callback then callback(questMapPinCache[cacheKey], nil) end
         return
       end
       local result = {

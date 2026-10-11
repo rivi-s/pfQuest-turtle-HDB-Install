@@ -8,30 +8,30 @@ end
 
 local function ParseVersion(label)
   label = tostring(label or "")
-  local _, _, major, minor, patch, alpha = string.find(
-    label, "^(%d+)%.(%d+)%.(%d+)%-alpha%.(%d+)$"
+  local _, _, major, minor, patch, stage, sequence = string.find(
+    label, "^(%d+)%.(%d+)%.(%d+)%-([%a]+)%.(%d+)$"
   )
+  local rank
   if major then
-    return tonumber(major) * 100000000
-      + tonumber(minor) * 1000000
-      + tonumber(patch) * 10000
-      + tonumber(alpha)
+    local stages = { alpha = 0, beta = 3000, rc = 6000 }
+    rank = stages[stage]
+    sequence = tonumber(sequence)
+    if not rank or sequence > 999 then return nil end
+    rank = rank + sequence
+  else
+    _, _, major, minor, patch = string.find(label, "^(%d+)%.(%d+)%.(%d+)$")
+    if not major then return nil end
+    rank = 9999
   end
-
-  _, _, major, minor, patch = string.find(label, "^(%d+)%.(%d+)%.(%d+)$")
-  if major then
-    return tonumber(major) * 100000000
-      + tonumber(minor) * 1000000
-      + tonumber(patch) * 10000
-      + 9999
-  end
+  return tonumber(major) * 100000000 + tonumber(minor) * 1000000
+    + tonumber(patch) * 10000 + rank
 end
 
 local localLabel = tostring(GetAddOnMetadata("pfQuest-turtle", "Version") or "")
 local alreadyshown = false
-local localversion = ParseVersion(localLabel) or 0
+local localversion = ParseVersion(localLabel)
 local remoteLabel = type(pfqtupdateavailable) == "string" and pfqtupdateavailable or nil
-local remoteversion = ParseVersion(remoteLabel) or 0
+local remoteversion = ParseVersion(remoteLabel)
 local loginchannels = { "RAID", "GUILD", "PARTY" }
 local groupchannels = { "RAID", "PARTY" }
 local addonPrefix = "pfqtHDB"
@@ -161,7 +161,7 @@ pfqtupdater:SetScript("OnEvent", function()
             if v == "VERSION" and remoteCode then
                 local strippedName = StripRealmName(arg4)
                 partyVersions[strippedName] = remotever
-                if remoteCode > localversion then
+                if localversion and remoteCode > localversion then
                     pfqtupdateavailable = remotever
                     remoteLabel = remotever
                     remoteversion = remoteCode
@@ -206,7 +206,7 @@ pfqtupdater:SetScript("OnEvent", function()
         pfqtupdater.group = groupsize
         UpdatePartyVersionDisplay()
     elseif event == "PLAYER_ENTERING_WORLD" then
-        if not alreadyshown and localversion < remoteversion then
+        if not alreadyshown and localversion and remoteversion and localversion < remoteversion then
             ShowUpdateNotice(remoteLabel)
             alreadyshown = true
         end

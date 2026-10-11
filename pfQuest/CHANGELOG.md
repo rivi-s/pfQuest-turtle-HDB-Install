@@ -1,5 +1,16 @@
 # pfQuest base patch notes
 
+## 0.2.0-beta.3 — 2026-10-10
+
+- Map and minimap appearance settings now refresh existing markers when Save & Close is pressed, including tracking pictures, cut-out circles and spawn colors.
+- Tracker font, opacity, level labels and default objective expansion apply immediately while preserving manually folded quests.
+- Minimum item drop chance changes refresh active quest markers; legacy quest-link enhancement respects its setting.
+- Reduced large quest and tracking delivery spikes with bounded SQL pages and shared pending quest loads.
+- Spread available quest-giver completion across frames and stopped idle background workers.
+- Fixed mining tracking toggle errors and false update notices comparing beta versions with older alpha versions.
+- Includes the earlier Git-only login, quest-progress, background map and database corrections since beta.2.
+- Occasional small processing or memory-cleanup pauses can remain with dense quest logs.
+
 ## Git update (0.2.0-beta.2) — 2026-10-08
 
 - Reduced dense-quest acceptance and login stalls with batched processing, fewer temporary allocations, and coordinated background workers.

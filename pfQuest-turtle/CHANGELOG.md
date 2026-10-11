@@ -1,5 +1,12 @@
 # pfQuest Turtle patch notes
 
+## 0.2.0-beta.3 — 2026-10-10
+
+- Quest-category filters refresh when saved; tooltips explain the repeatable-quest requirement.
+- Party marker settings refresh cached party data and routing immediately.
+- Loot-panel settings refresh an already open panel.
+- Includes previously published Git-only Turtle quest-data and continent-map corrections.
+
 ## Git update (0.2.0-beta.2) — 2026-10-08
 
 - Improved dense continent-map performance and made Purple Lotus continent pins sparser, preserving zone-map and minimap coverage.

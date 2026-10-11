@@ -178,6 +178,15 @@ local function queueAdd(entry)
   pfQuest.queueCount = pfQuest.queueCount + 1
 end
 
+-- Source filtering changes belong on the established bounded quest queue.
+function pfQuest:RefreshItemSourceSettings()
+  for id, quest in pairs(self.questlog or {}) do
+    if quest.qlogid and quest.title then
+      queueAdd({ quest.title, id, quest.qlogid, "RELOAD" })
+    end
+  end
+end
+
 local skillstate = ""
 pfQuest:RegisterEvent("QUEST_WATCH_UPDATE")
 pfQuest:RegisterEvent("QUEST_LOG_UPDATE")
@@ -1522,6 +1531,7 @@ end
 if not GetQuestLink then -- Allow to send questlinks from questlog
   local pfHookQuestLogTitleButton_OnClick = QuestLogTitleButton_OnClick
   QuestLogTitleButton_OnClick = function(button)
+    if pfQuest_config.questlinks == "0" then return pfHookQuestLogTitleButton_OnClick(button) end
     local scrollFrame = EQL3_QuestLogListScrollFrame or ShaguQuest_QuestLogListScrollFrame or QuestLogListScrollFrame
     local questIndex = this:GetID() + FauxScrollFrame_GetOffset(scrollFrame)
     local questName, questLevel = compat.GetQuestLogTitle(questIndex)
@@ -1609,6 +1619,7 @@ if not GetQuestLink then -- Allow to send questlinks from questlog
   end
 
   SetItemRef = function(link, text, button)
+    if pfQuest_config.questlinks == "0" then return pfQuestHookSetItemRef(link, text, button) end
     local isQuest, _, id = string.find(link, "quest:(%d+):.*")
     local isQuest2, _, _ = string.find(link, "quest2:.*")
 
@@ -1685,6 +1696,7 @@ else
   local pfQuestHookSetItemRef = SetItemRef
   SetItemRef = function(link, text, button)
     pfQuestHookSetItemRef(link, text, button)
+    if pfQuest_config.questlinks == "0" then return end
 
     -- skip modifier clicks
     if IsAltKeyDown() or IsControlKeyDown() or IsShiftKeyDown() then

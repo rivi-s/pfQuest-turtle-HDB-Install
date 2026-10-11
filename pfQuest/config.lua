@@ -149,7 +149,7 @@ pfQuest_defconfig = {
   { text = "Quest Database URL", default = "1", type = "button", func = OpenDatabaseURL },
   { text = L["Show Database IDs"], default = "0", type = "checkbox", config = "showids" },
   { text = L["Draw Favorites On Login"], default = "0", type = "checkbox", config = "favonlogin" },
-  { text = L["Minimum Item Drop Chance"], default = "1", type = "text", config = "mindropchance" },
+  { text = L["Minimum Item Drop Chance"], default = "1", type = "text", config = "mindropchance", tooltip = "Filters known item drop sources below this percentage. Vendors are unaffected. Active quest markers refresh after saving; repeat a database search to refresh its existing markers." },
   { text = L["Show Tooltips"], default = "1", type = "checkbox", config = "showtooltips" },
   { text = L["Show Help On Tooltips"], default = "1", type = "checkbox", config = "tooltiphelp" },
   { text = L["Show Level On Quest Tracker"], default = "1", type = "checkbox", config = "trackerlevel" },
@@ -290,6 +290,41 @@ pfQuestConfig.close.texture:SetPoint("BOTTOMRIGHT", pfQuestConfig.close, "BOTTOM
 pfQuestConfig.close.texture:SetVertexColor(1, 0.25, 0.25, 1)
 pfUI.api.SkinButton(pfQuestConfig.close, 1, 0.5, 0.5)
 local function CloseConfigWindow()
+  if pfQuestConfig.mapAppearancePending and pfMap and pfMap.ApplyMapAppearance then
+    pfMap:ApplyMapAppearance()
+    pfQuestConfig.mapAppearancePending = nil
+  end
+  if pfQuestConfig.trackingIconsPending and pfMap and pfMap.RefreshTrackingIcons then
+    pfMap:RefreshTrackingIcons()
+    pfQuestConfig.trackingIconsPending = nil
+  end
+  if pfQuestConfig.continentSettingsPending and pfMap and pfMap.ApplyContinentSettings then
+    pfMap:ApplyContinentSettings(pfQuestConfig.continentSettingsPending)
+    pfQuestConfig.continentSettingsPending = nil
+  end
+  if pfQuestConfig.trackerAppearancePending and pfQuest.tracker and pfQuest.tracker.ApplyAppearance then
+    pfQuest.tracker.ApplyAppearance(pfQuestConfig.trackerAppearancePending)
+    pfQuestConfig.trackerAppearancePending = nil
+  end
+  if pfQuestConfig.questFiltersPending then
+    if pfDatabase and pfDatabase.InvalidateHDBQuestGiverRequest then
+      pfDatabase:InvalidateHDBQuestGiverRequest()
+    end
+    pfQuest.updateQuestGivers = true
+    pfQuestConfig.questFiltersPending = nil
+  end
+  if pfQuestConfig.partySettingsPending and pfMap and pfMap.ApplyPartySettings then
+    pfMap:ApplyPartySettings(pfQuestConfig.partySettingsPending)
+    pfQuestConfig.partySettingsPending = nil
+  end
+  if pfQuestConfig.itemSourceSettingsPending and pfQuest.RefreshItemSourceSettings then
+    pfQuest:RefreshItemSourceSettings()
+    pfQuestConfig.itemSourceSettingsPending = nil
+  end
+  if pfQuestConfig.lootSettingsPending and pfQuestLoot and pfQuestLoot.ApplySettings then
+    pfQuestLoot.ApplySettings()
+    pfQuestConfig.lootSettingsPending = nil
+  end
   pfQuestConfig:Hide()
   if pfQuestConfig.reloadRequired then
     if pfUI and pfUI.api and pfUI.api.CreateQuestionDialog then
@@ -598,11 +633,30 @@ local function HandleConfigToggle(input)
   elseif input.config == "showtracker" and pfQuest.tracker then
     if checked then pfQuest.tracker:Show() else pfQuest.tracker:Hide() end
   elseif input.config == "trackerlevel" or input.config == "trackerexpand" then
-    if pfQuest.tracker and pfQuest.tracker.DoLayout then pfQuest.tracker.DoLayout() end
+    pfQuestConfig.trackerAppearancePending = pfQuestConfig.trackerAppearancePending or {}
+    pfQuestConfig.trackerAppearancePending[input.config] = true
   elseif fullRefreshSettings[input.config] then
     pfQuestConfig:RequestRefresh("full")
+  elseif input.config == "hideChickenQuests" or input.config == "hideFelwoodFlowers"
+      or input.config == "hidePvPQuests" or input.config == "hideDonationQuests" then
+    pfQuestConfig.questFiltersPending = true
+  elseif input.config == "showPartyQuestPins" or input.config == "showPartyQuestPinsRoutable" then
+    pfQuestConfig.partySettingsPending = pfQuestConfig.partySettingsPending or {}
+    pfQuestConfig.partySettingsPending[input.config] = true
+  elseif input.config and string.find(input.config, "^lootPanel") then
+    pfQuestConfig.lootSettingsPending = true
+  elseif input.config == "continentPins" then
+    pfQuestConfig.continentSettingsPending = pfQuestConfig.continentSettingsPending or {}
+    pfQuestConfig.continentSettingsPending.visibility = true
   elseif mapRefreshSettings[input.config] then
-    pfQuestConfig:RequestRefresh("map")
+    if input.config == "trackingicons" then pfQuestConfig.trackingIconsPending = true end
+    if input.config == "minimapnodes" or input.config == "cutoutminimap"
+        or input.config == "cutoutworldmap" or input.config == "spawncolors"
+        or input.config == "clustermono" then
+      pfQuestConfig.mapAppearancePending = true
+    else
+      pfQuestConfig:RequestRefresh("map")
+    end
   elseif input.config == "routes" or input.config == "routecluster" or input.config == "routeender"
     or input.config == "routestarter" or input.config == "routeminimap" or input.config == "arrow" then
     if input.config == "arrow" and not checked and pfQuest.route and pfQuest.route.arrow then
@@ -617,7 +671,12 @@ local function HandleConfigTextChanged(input)
   local saved = input.globalconfig and pfQuest_global or pfQuest_config
   saved[input.globalconfig or input.config] = input:GetText()
 
-  if input.config == "worldmaptransp" or input.config == "minimaptransp" or input.config == "nodefade" then
+  if input.config == "mindropchance" then
+    pfQuestConfig.itemSourceSettingsPending = true
+  elseif input.config == "continentNodeSize" or input.config == "continentUtilityNodeSize" then
+    pfQuestConfig.continentSettingsPending = pfQuestConfig.continentSettingsPending or {}
+    pfQuestConfig.continentSettingsPending.size = true
+  elseif input.config == "worldmaptransp" or input.config == "minimaptransp" or input.config == "nodefade" then
     if input.config ~= "nodefade" and pfMap and pfMap.highlightdb then
       local value = tonumber(input:GetText()) or 1
       for frame in pairs(pfMap.highlightdb) do
@@ -631,7 +690,8 @@ local function HandleConfigTextChanged(input)
     end
     pfQuestConfig:RequestRefresh("map")
   elseif input.config == "trackerfontsize" or input.config == "trackeralpha" then
-    if pfQuest.tracker and pfQuest.tracker.DoLayout then pfQuest.tracker.DoLayout() end
+    pfQuestConfig.trackerAppearancePending = pfQuestConfig.trackerAppearancePending or {}
+    pfQuestConfig.trackerAppearancePending[input.config] = true
   elseif input.config == "arrowscale" and ResizeArrow then
     ResizeArrow()
   end

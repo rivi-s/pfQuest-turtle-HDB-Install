@@ -1305,6 +1305,92 @@ function pfMap:RefreshPinColor(colorKey)
   end
 end
 
+local clusterTextureBase = {}
+for _, kind in ipairs({ "item", "mob", "misc" }) do
+  local texture = addon_path .. "\\img\\cluster_" .. kind
+  clusterTextureBase[texture] = texture
+  clusterTextureBase[texture .. "_mono"] = texture
+end
+local function GetClusterTexture(texture)
+  local base = texture and clusterTextureBase[texture]
+  if not base then return texture end
+  return pfQuest_config.clustermono == "1" and base .. "_mono" or base
+end
+
+local function GetNodePicture(frame)
+  local icon = (frame.title and pfQuest.icons[frame.title]) or frame.icon
+  if not icon and frame.tracking then
+    icon = frame.spawn and pfDatabase.icons[frame.spawn]
+    if not icon and frame.spawnid and pfDatabase.iconsByID then
+      local kind = frame.spawntype == pfQuest_Loc["Object"] and "O" or "U"
+      icon = pfDatabase.iconsByID[kind .. frame.spawnid]
+    end
+  end
+  return icon
+end
+
+local function PaintPlainNode(frame, obj, distance)
+  local r, g, b = str2rgb(frame.color)
+  local showIcon = not (frame.tracking and pfQuest_config.trackingicons == "0")
+  frame.showTrackingIcon = showIcon
+  local icon = showIcon and GetNodePicture(frame)
+  if icon then
+    frame.pic:SetTexture(icon)
+    frame.pic:Show()
+    if obj == "minimap" then UpdateMinimapIconFade(frame, distance) end
+  else
+    frame.pic:Hide()
+  end
+  local texture = TEX_NODE
+  if frame.addon == "PFPARTY" then
+    texture = TEX_STAR
+  elseif pfQuest_config[obj == "minimap" and "cutoutminimap" or "cutoutworldmap"] == "1" then
+    texture = TEX_NODECUT
+  end
+  frame.tex:SetTexture(texture)
+  frame.tex:SetVertexColor(r, g, b, 1)
+end
+
+-- Appearance changes do not mutate source nodes. Repaint reusable frames and
+-- invalidate the visual cache without querying or rebuilding quest data.
+function pfMap:ApplyMapAppearance()
+  self.appearanceRevision = (self.appearanceRevision or 0) + 1
+  for frame in pairs(self.highlightdb or {}) do
+    if frame.cluster and frame.texture and frame.tex then
+      local texture = GetClusterTexture(frame.texture)
+      if texture ~= frame.texture then
+        frame.texture = texture
+        frame.tex:SetTexture(texture)
+      end
+    elseif not frame.texture and frame.tex and frame.pic then
+      frame.color = pfQuest_config.spawncolors == "1" and (frame.spawn or frame.title) or frame.title
+      PaintPlainNode(frame, frame.minimap and "minimap" or nil)
+    end
+    frame.appearanceRevision = self.appearanceRevision
+  end
+  self.minimapDisabled = nil
+  -- The minimap's timing/movement caches must allow a one-time settings redraw.
+  self.minimapSettingsRevision = (self.minimapSettingsRevision or 0) + 1
+  self:UpdateMinimap()
+end
+
+-- Repaint existing tracking pictures without rebuilding quest data or positions.
+function pfMap:RefreshTrackingIcons()
+  local enabled = pfQuest_config.trackingicons ~= "0"
+  for frame in pairs(self.highlightdb or {}) do
+    if frame.tracking and not frame.texture and frame.pic then
+      local icon = GetNodePicture(frame)
+      frame.showTrackingIcon = enabled
+      if enabled and icon then
+        frame.pic:SetTexture(icon)
+        frame.pic:Show()
+      else
+        frame.pic:Hide()
+      end
+    end
+  end
+end
+
 function pfMap:UpdateNode(frame, node, color, obj, distance)
   -- clear node to title association table
   if pfMap.highlightdb[frame] then
@@ -1330,7 +1416,7 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
     end
 
     if tab.spawn and (tab.layer > frame.layer or not frame.spawn) then
-      frame.updateTexture = (frame.texture ~= tab.texture)
+      frame.updateTexture = (frame.texture ~= GetClusterTexture(tab.texture))
       frame.updateVertex = (frame.vertex ~= tab.vertex)
       frame.updateColor = (frame.color ~= tab.color)
       frame.updateLayer = (frame.layer ~= tab.layer)
@@ -1351,7 +1437,7 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
       frame.respawn = tab.respawn
       frame.level = tab.level
       frame.questid = tab.questid
-      frame.texture = tab.texture
+      frame.texture = GetClusterTexture(tab.texture)
       frame.vertex = tab.vertex
       frame.title = title
       frame.func = tab.func
@@ -1363,6 +1449,7 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
       frame.itemreq = tab.itemreq
       frame.arrow = tab.arrow
       frame.icon = tab.icon
+      frame.tracking = tab.tracking
       frame.fade_range = tab.fade_range
       frame.sharedspawns = tab.sharedspawns
       frame.relatedobjectives = tab.relatedobjectives
@@ -1388,37 +1475,14 @@ function pfMap:UpdateNode(frame, node, color, obj, distance)
     end
   end
 
-  if (frame.updateColor or frame.updateTexture or frame.updateAddon or not frame.tex:GetTexture()) and not frame.texture then
-    local r, g, b = str2rgb(frame.color)
-
-    if (frame.title and pfQuest.icons[frame.title]) or frame.icon then
-      local texture = (frame.title and pfQuest.icons[frame.title]) or frame.icon
-      frame.pic:SetTexture(texture)
-      frame.pic:Show()
-
-      if obj == "minimap" then
-        UpdateMinimapIconFade(frame, distance)
-      end
-    else
-      frame.pic:Hide()
-    end
-
-    if frame.addon == "PFPARTY" then
-      -- The cutout styles are a ring-shape variant; there is no cutout star,
-      -- so party pins keep the same tinted star regardless of that setting.
-      frame.tex:SetTexture(TEX_STAR)
-      frame.tex:SetVertexColor(r, g, b, 1)
-    elseif obj == "minimap" and pfQuest_config["cutoutminimap"] == "1" then
-      frame.tex:SetTexture(TEX_NODECUT)
-      frame.tex:SetVertexColor(r, g, b, 1)
-    elseif obj ~= "minimap" and pfQuest_config["cutoutworldmap"] == "1" then
-      frame.tex:SetTexture(TEX_NODECUT)
-      frame.tex:SetVertexColor(r, g, b, 1)
-    else
-      frame.tex:SetTexture(TEX_NODE)
-      frame.tex:SetVertexColor(r, g, b, 1)
-    end
+  local showTrackingIcon = not (frame.tracking and pfQuest_config.trackingicons == "0")
+  local trackingIconChanged = frame.showTrackingIcon ~= showTrackingIcon
+  frame.showTrackingIcon = showTrackingIcon
+  if (frame.updateColor or frame.updateTexture or frame.updateAddon or trackingIconChanged
+      or frame.appearanceRevision ~= pfMap.appearanceRevision or not frame.tex:GetTexture()) and not frame.texture then
+    PaintPlainNode(frame, obj, distance)
   end
+  frame.appearanceRevision = pfMap.appearanceRevision
 
   if frame.updateLayer then
     -- City maps such as Ironforge draw their detailed map artwork above the
@@ -1909,7 +1973,9 @@ function pfMap:UpdateNodes()
         -- and nothing has been added/removed from it since the last UpdateNodes call.
         -- pfMap.dirtyNodes[node] is set by AddNode/DeleteNode on any real write.
         -- frame.node ~= node catches coord-slot shifts from insertions/removals.
-        if pfMap.pins[i].node ~= node or pfMap.dirtyNodes[node] then
+        if pfMap.pins[i].node ~= node or pfMap.dirtyNodes[node]
+          or pfMap.pins[i].appearanceRevision ~= pfMap.appearanceRevision
+          or pfMap.pins[i].showTrackingIcon ~= not (pfMap.pins[i].tracking and pfQuest_config.trackingicons == "0") then
           pfMap:UpdateNode(pfMap.pins[i], node, color)
           pfMap.dirtyNodes[node] = nil
         else
@@ -2045,7 +2111,16 @@ end
 function pfMap:UpdateMinimap()
   -- check for disabled minimap nodes
   if pfQuest_config["minimapnodes"] == "0" then
+    if not pfMap.minimapDisabled then
+      for _, pin in pairs(pfMap.mpins or {}) do pin:Hide() end
+      pfMap.minimapDisabled = true
+    end
     return
+  end
+  pfMap.minimapDisabled = nil
+  if this.minimapAppearanceSeen ~= pfMap.minimapSettingsRevision then
+    this.minimapAppearanceSeen = pfMap.minimapSettingsRevision
+    this.minimapTick, this.minimapAnchorAt, this.xPlayer = nil, nil, nil
   end
 
   -- Holding Ctrl over the minimap is an interaction gesture, not a normal map
@@ -2262,7 +2337,9 @@ function pfMap:UpdateMinimap()
           -- skip expensive UpdateNode work (highlightdb rebuild, node iteration,
           -- size calls) when this pin is already showing the correct node and
           -- nothing has been added or removed from it since the last render.
-          if pin.node ~= node or pfMap.dirtyMinimapNodes[node] then
+          if pin.node ~= node or pfMap.dirtyMinimapNodes[node]
+            or pin.appearanceRevision ~= pfMap.appearanceRevision
+            or pin.showTrackingIcon ~= not (pin.tracking and pfQuest_config.trackingicons == "0") then
             pfMap:UpdateNode(pin, node, color, "minimap", distance)
             pfMap.dirtyMinimapNodes[node] = nil
           end
@@ -2473,7 +2550,9 @@ function pfMap:PrepareHiddenMapPins()
       pin:SetParent(WorldMapButton)
       pin.lastX, pin.lastY = nil, nil
     end
-    if pin.node ~= node or self.dirtyNodes[node] then
+    if pin.node ~= node or self.dirtyNodes[node]
+      or pin.appearanceRevision ~= pfMap.appearanceRevision
+      or pin.showTrackingIcon ~= not (pin.tracking and pfQuest_config.trackingicons == "0") then
       self:UpdateNode(pin, node, color)
       self.dirtyNodes[node] = nil
     end
