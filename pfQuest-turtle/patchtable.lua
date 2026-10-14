@@ -766,7 +766,8 @@ pfMap.NodeEnter = function()
     tooltip:AddLine(" ")
 
     for title, meta in pairs(this.node) do
-      pfMap:ShowTooltip(meta, tooltip)
+      local selected = pfMap.GetActiveQuestVariant and pfMap:GetActiveQuestVariant(meta) or meta
+      pfMap:ShowTooltip(selected, tooltip)
     end
 
     if pfQuest_config["tooltiphelp"] == "1" then
@@ -797,7 +798,8 @@ pfMap.NodeEnter = function()
     tooltip:AddDoubleLine(pfQuest_Loc["Respawn"] .. ":", (this.respawn or UNKNOWN), .8,.8,.8, 1,1,1)
 
     for title, meta in pairs(this.node) do
-      pfMap:ShowTooltip(meta, tooltip)
+      local selected = pfMap.GetActiveQuestVariant and pfMap:GetActiveQuestVariant(meta) or meta
+      pfMap:ShowTooltip(selected, tooltip)
     end
 
     if pfQuest_config["tooltiphelp"] == "1" then

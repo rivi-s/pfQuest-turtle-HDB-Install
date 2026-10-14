@@ -155,7 +155,7 @@ local function ScanQuestObjectives()
                                 if type(activeObj) == "table" and type(activeObj.objective) == "string" then
                                     local objNameBase = string.gsub(activeObj.objective, " slain$", "")
                                     objNameBase = string.gsub(objNameBase, " killed$", "")
-                                    if (objNameBase == targetName or string.find(activeObj.objective, targetName, 1, true)) and
+                                    if objNameBase == targetName and
                                        (activeObj.current or 0) < (activeObj.total or 0) then
                                         questObjectives[targetName] = SWORD_ICON
                                     end
@@ -195,8 +195,8 @@ local function ScanQuestObjectives()
                     end
                 end
 	            end
+    end
     return unresolvedRows
-end
 end
 
 local function IsNameplate(frame)

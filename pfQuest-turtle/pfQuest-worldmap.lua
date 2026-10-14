@@ -2,6 +2,20 @@ local original_UpdateNodes = pfMap.UpdateNodes
 local original_UpdateNode = pfMap.UpdateNode
 
 local continentPins = {}
+local preparedContinents = {}
+local continentNodeRevision = 0
+local continentNodesChangedAt = 0
+local original_AddNode, original_DeleteNode = pfMap.AddNode, pfMap.DeleteNode
+function pfMap:AddNode(meta)
+    continentNodeRevision = continentNodeRevision + 1
+    continentNodesChangedAt = GetTime()
+    return original_AddNode(self, meta)
+end
+function pfMap:DeleteNode(addon, title)
+    continentNodeRevision = continentNodeRevision + 1
+    continentNodesChangedAt = GetTime()
+    return original_DeleteNode(self, addon, title)
+end
 local maxContinentPins = 2000
 local continentRenderLastKey
 local continentRenderLastAt = 0
@@ -323,6 +337,11 @@ local function GetZoneContinent(zoneID)
     return nil
 end
 
+-- Share continent classification with the active-quest loading priority.
+function pfMap:GetHDBZoneContinent(zoneID)
+    return GetZoneContinent(zoneID)
+end
+
 -- Warm optional ClassicAPI fog data one zone at a time. A map redraw only
 -- reads this cache; it never triggers a cross-zone API query itself.
 local explorationQueue, explorationQueueIndex, explorationQueueKey = {}, 1, nil
@@ -576,9 +595,11 @@ local function ConfigureContinentPinInteraction(pin, force)
     end
 end
 
-local function CreateContinentPin(index)
-    if not continentPins[index] then
-        local pin = CreateFrame("Button", "pfQuestContinentPin" .. index, WorldMapButton)
+local function CreateContinentPin(index, prepared)
+    local pool = prepared and prepared.pins or continentPins
+    if not pool[index] then
+        local name = prepared and ("pfQuestPreparedContinent" .. prepared.continent .. "Pin") or "pfQuestContinentPin"
+        local pin = CreateFrame("Button", name .. index, prepared and prepared.parent or WorldMapButton)
         pin.worldmap = true
         pin:SetScript("OnHide", function()
             if pfMap.ReleaseNodeTooltip then pfMap:ReleaseNodeTooltip(this) end
@@ -594,10 +615,10 @@ local function CreateContinentPin(index)
         pin.hl:SetPoint("TOPLEFT", pin, "TOPLEFT", -5, 5)
         pin.hl:Hide()
         pin.defalpha, pin.Animate, pin.dt = 1, NodeAnimate, 0
-        continentPins[index] = pin
+        pool[index] = pin
     end
-    ConfigureContinentPinInteraction(continentPins[index])
-    return continentPins[index]
+    ConfigureContinentPinInteraction(pool[index])
+    return pool[index]
 end
 
 local function HideContinentPin(pin)
@@ -788,7 +809,7 @@ local function ThinContinentItemNode(processedQuests, node, continent, x, y)
     return false
 end
 
-local function PlaceContinentPins(continent, layout, pinCount, playerLevel, processedQuests, stats)
+local function PlaceContinentPins(continent, layout, pinCount, playerLevel, processedQuests, stats, prepared)
     local currentZoneOnly = tonumber(pfQuest_config["trackingmethod"]) == 5
     local playerMapID = pfMap.GetPlayerMapID and pfMap:GetPlayerMapID() or pfMap.playerMapID
     local hideUnexplored = pfQuest_config["hideunexplored"] == "1"
@@ -848,6 +869,13 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
                 if customContinentTransforms[zID] or (uiMapID and mapData[uiMapID]) then
                     stats.zonesWithUiMapID = stats.zonesWithUiMapID + 1
                     for coords, node in pairs(zoneNodes) do
+                        if prepared then
+                            prepared.scanned = (prepared.scanned or 0) + 1
+                            if prepared.scanned > 6 then
+                                prepared.scanned = 1
+                                coroutine.yield()
+                            end
+                        end
                         local skipNode = false
                         local questKey = nil
 
@@ -1019,7 +1047,7 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
                                         local worldMapX = layout[3] + layout[1] * contX
                                         local worldMapY = layout[4] + layout[2] * contY
 
-                                        local pin = CreateContinentPin(pinCount)
+                                        local pin = CreateContinentPin(pinCount, prepared)
                                         pin.node = node
                                         pin.sourceContinent = continent
                                         pin.sourceZone = zID
@@ -1075,6 +1103,93 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
 end
 
 
+-- Each continent owns hidden frames, so preparing it never overwrites zone
+-- projections. A changed source/configuration cancels the coroutine before resume.
+local preparationKey, keyRevision, keyAppearance, keyZone, keyLevel, keyWidth, keyHeight
+local keyTracking, keyExploration, keyCluster, keySpawn, keySize, keyUtilitySize
+local function ContinentPreparationKey()
+    local zone, level = pfMap:GetPlayerMapID(), UnitLevel("player")
+    local width, height = WorldMapButton:GetWidth(), WorldMapButton:GetHeight()
+    if preparationKey and keyRevision == continentNodeRevision and keyAppearance == pfMap.appearanceRevision
+        and keyZone == zone and keyLevel == level and keyWidth == width and keyHeight == height
+        and keyTracking == pfQuest_config.trackingmethod and keyExploration == pfQuest_config.hideunexplored
+        and keyCluster == pfQuest_config.showcluster and keySpawn == pfQuest_config.showspawn
+        and keySize == pfQuest_config.continentNodeSize and keyUtilitySize == pfQuest_config.continentUtilityNodeSize then
+        return preparationKey
+    end
+    keyRevision, keyAppearance, keyZone, keyLevel = continentNodeRevision, pfMap.appearanceRevision, zone, level
+    keyWidth, keyHeight = width, height
+    keyTracking, keyExploration = pfQuest_config.trackingmethod, pfQuest_config.hideunexplored
+    keyCluster, keySpawn = pfQuest_config.showcluster, pfQuest_config.showspawn
+    keySize, keyUtilitySize = pfQuest_config.continentNodeSize, pfQuest_config.continentUtilityNodeSize
+    preparationKey = table.concat({ tostring(keyRevision), tostring(keyAppearance), tostring(zone), tostring(level),
+        tostring(width), tostring(height), tostring(keyTracking), tostring(keyExploration),
+        tostring(keyCluster), tostring(keySpawn), tostring(keySize), tostring(keyUtilitySize) }, ":")
+    return preparationKey
+end
+local function HidePreparedContinents()
+    for _, prepared in pairs(preparedContinents) do prepared.parent:Hide() end
+end
+local preparationDriver = CreateFrame("Frame", "pfQuestHDBContinentPreparationDriver")
+if pfQuestHDBWork then table.insert(pfQuestHDBWork.keys, "continent") end
+preparationDriver:SetScript("OnUpdate", function()
+    if not pfQuestHDBWork then return end
+    if pfQuest_config.continentPins == "0" or pfQuest_config.hideunexplored == "1"
+        or WorldMapFrame:IsShown() or pfMap.queue_update
+        or pfDatabase.hdbPinsPending
+        or (pfQuest and ((pfQuest.queueCount or 0) > 0 or pfQuest.updateQuestLog or pfQuest.updateQuestGivers))
+        or GetTime() - continentNodesChangedAt < 0.3 then
+        pfQuestHDBWork:Release("continent")
+        return
+    end
+    local zone = pfMap:GetPlayerMapID()
+    if pfMap.dirtyMaps and pfMap.dirtyMaps[zone] and pfMap.hiddenPinsReady ~= zone then
+        pfQuestHDBWork:Release("continent")
+        return
+    end
+    local current = GetZoneContinent(zone)
+    if current ~= 1 and current ~= 2 then pfQuestHDBWork:Release("continent"); return end
+    if WorldMapButton:GetWidth() <= 0 or WorldMapButton:GetHeight() <= 0 then return end
+    local key = ContinentPreparationKey()
+    local selected
+    for tier = 1, 2 do
+        local continent = tier == 1 and current or 3 - current
+        local prepared = preparedContinents[continent]
+        if not prepared then
+            local parent = CreateFrame("Frame", "pfQuestPreparedContinent" .. continent, WorldMapButton)
+            parent:SetAllPoints(WorldMapButton)
+            parent:Hide()
+            prepared = { continent = continent, parent = parent, pins = {} }
+            preparedContinents[continent] = prepared
+        end
+        if prepared.key ~= key then
+            prepared.key, prepared.ready, prepared.scanned = key, nil, 0
+            prepared.parent:Hide()
+            prepared.job = coroutine.create(function()
+                local stats = { zonesSeen = 0, zonesMatched = 0, zonesWithUiMapID = 0,
+                    nodesFiltered = 0, nodesConverted = 0, zonesSampled = {} }
+                local count = PlaceContinentPins(prepared.continent, IDENTITY_LAYOUT, 0,
+                    UnitLevel("player"), {}, stats, prepared)
+                for index = count + 1, table.getn(prepared.pins) do
+                    HideContinentPin(prepared.pins[index])
+                    if math.mod(index - count, 6) == 0 then coroutine.yield() end
+                end
+                prepared.ready = true
+            end)
+        end
+        if not prepared.ready then selected = prepared; break end
+    end
+    if not selected then pfQuestHDBWork:Release("continent"); return end
+    if not pfQuestHDBWork:Claim("continent") then return end
+    local ok, message = coroutine.resume(selected.job)
+    if not ok then
+        selected.job, selected.ready = nil, true
+        selected.key = nil
+        pfQuestHDBWork:Release("continent")
+        if geterrorhandler then geterrorhandler()(message) end
+    end
+end)
+
 local function StartContinentRender(continent, viewKey)
     local playerLevel = UnitLevel("player")
     local processedQuests = {}
@@ -1119,6 +1234,7 @@ function pfMap:UpdateNodes()
     -- view. Suppress duplicate redraws that arrive immediately together.
     if continentRenderLastKey == viewKey and GetTime() - continentRenderLastAt < 0.5 then return end
 
+    HidePreparedContinents()
     for i = 1, maxContinentPins do
         if continentPins[i] then
             HideContinentPin(continentPins[i])
@@ -1166,7 +1282,13 @@ function pfMap:UpdateNodes()
     if pfQuest_config["hideunexplored"] == "1" then
         QueueExplorationWarmup(continent, viewKey)
     end
-    StartContinentRender(continent, viewKey)
+    local prepared = preparedContinents[continent]
+    if prepared and prepared.ready and prepared.key == ContinentPreparationKey() then
+        prepared.parent:Show()
+        continentRenderLastKey, continentRenderLastAt = viewKey, GetTime()
+    else
+        StartContinentRender(continent, viewKey)
+    end
 end
 
 -- Apply projection-only settings without reloading quest data.
@@ -1177,6 +1299,8 @@ function pfMap:ApplyContinentSettings(changes)
         end
     end
     if changes.visibility then
+        HidePreparedContinents()
+        for _, prepared in pairs(preparedContinents) do prepared.key = nil end
         continentRenderLastKey = nil
         continentRenderLastAt = 0
         -- Continent visibility must not hide city projections on zone maps.

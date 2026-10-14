@@ -12,14 +12,20 @@ local targetDecodeJobs = {}
 local targetDecodeGeneration = 0
 local targetDecodeDriver = CreateFrame("Frame", "pfQuestHDBResultDecoder")
 targetDecodeDriver:SetScript("OnUpdate", function()
-  local job = targetDecodeJobs[1]
-  if not job then
+  if not targetDecodeJobs[1] then
     if pfQuestHDBWork then pfQuestHDBWork:Release("decode") end
     targetDecodeDriver:Hide()
     return
   end
   if pfQuestHDBWork and not pfQuestHDBWork:Claim("decode") then return end
-  if job() then table.remove(targetDecodeJobs, 1) end
+  local selected = 1
+  if pfQuestHDBWork and pfQuestHDBWork.SelectJob then
+    selected = pfQuestHDBWork:SelectJob(targetDecodeJobs, function(_, job)
+      return job.questID and pfQuest and pfQuest.GetQuestZonePriority and pfQuest:GetQuestZonePriority(job.questID) or 0
+    end, "decode-priority") or 1
+  end
+  local job = targetDecodeJobs[selected]
+  if job.run() then table.remove(targetDecodeJobs, selected) end
   if not targetDecodeJobs[1] then
     if pfQuestHDBWork then pfQuestHDBWork:Release("decode") end
     targetDecodeDriver:Hide()
@@ -27,8 +33,8 @@ targetDecodeDriver:SetScript("OnUpdate", function()
 end)
 targetDecodeDriver:Hide()
 provider.targetDecodeDriver = targetDecodeDriver
-local function QueueTargetDecode(job)
-  table.insert(targetDecodeJobs, job)
+local function QueueTargetDecode(job, questID)
+  table.insert(targetDecodeJobs, { run = job, questID = questID })
   targetDecodeDriver:Show()
 end
 local questMapPinCache = {}
@@ -1074,7 +1080,7 @@ function provider:GetQuestStartPinsAsync(options, callback)
   return ticket
 end
 
-function provider:GetQuestTargetsAsync(id, callback, limit)
+function provider:GetQuestTargetsAsync(id, callback, limit, onPage)
   local handle = Open()
   id = tonumber(id)
   if not handle or not id then
@@ -1092,15 +1098,20 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
   local pending = questTargetPending[cacheKey]
   if pending and pending.generation == targetDecodeGeneration then
     if callback then table.insert(pending.callbacks, callback) end
+    if onPage then
+      table.insert(pending.progress, onPage)
+      if pending.records and table.getn(pending.records) > 0 then onPage(pending.records) end
+    end
     return true
   end
-  pending = { generation = targetDecodeGeneration, callbacks = {} }
+  pending = { generation = targetDecodeGeneration, callbacks = {}, progress = {} }
   if callback then table.insert(pending.callbacks, callback) end
+  if onPage then table.insert(pending.progress, onPage) end
   questTargetPending[cacheKey] = pending
   local function Complete(records, err)
     if questTargetPending[cacheKey] == pending then questTargetPending[cacheKey] = nil end
     local callbacks = pending.callbacks
-    pending.callbacks = {}
+    pending.callbacks, pending.progress = {}, {}
     for index = 1, table.getn(callbacks) do
       local ok, message = pcall(callbacks[index], records, err)
       if not ok and type(geterrorhandler) == "function" then geterrorhandler()(message) end
@@ -1175,8 +1186,13 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
 
 
   -- Keep native Lua result delivery bounded; normalize each page before requesting more.
-  sql = sql .. " ORDER BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18"
+  -- Freeze this SQL order for the complete page chain: changing OFFSET order
+  -- mid-request would duplicate or omit rows if the player changes zones.
+  local regionOrder = onPage and limit <= 0 and pfMap and pfMap.GetHDBRegionOrderSQL
+    and pfMap:GetHDBRegionOrderSQL() or ""
+  sql = sql .. " ORDER BY " .. regionOrder .. "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18"
   local records, offset, finished = {}, 0, false
+  pending.records = records
   local generation = targetDecodeGeneration
   local SubmitPage
   local function Fail(message)
@@ -1195,7 +1211,7 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
         return
       end
 
-      local index = 1
+      local index, pageRecords = 1, {}
       if generation ~= targetDecodeGeneration then Fail("database cache changed during paged query") return end
       local count = table.getn(rows or {})
       local function DecodeBatch()
@@ -1224,10 +1240,15 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
           sharedSpawns = sharedSpawns,
           relatedObjectives = relatedObjectives,
         })
+        table.insert(pageRecords, records[table.getn(records)])
         end
         index = last + 1
         if index <= count then return false end
         offset = offset + count
+        for _, progress in ipairs(pending.progress) do
+          local ok, message = pcall(progress, pageRecords)
+          if not ok and type(geterrorhandler) == "function" then geterrorhandler()(message) end
+        end
         if count == pageSize and (limit <= 0 or offset < limit) then SubmitPage() return true end
         finished = true
         questTargetCache[cacheKey] = records
@@ -1236,7 +1257,7 @@ function provider:GetQuestTargetsAsync(id, callback, limit)
         else Complete(records, nil) end
         return true
       end
-      if count > 32 then QueueTargetDecode(DecodeBatch)
+      if count > 32 then QueueTargetDecode(DecodeBatch, id)
       else DecodeBatch() end
     end)
     if not ok or not ticket then
@@ -1285,7 +1306,7 @@ end
 -- Public provider boundary for a future vanilla pfQuest-HDB edition. It owns
 -- the asynchronous lookup and returns only map-ready records, so consumers do
 -- not need to know about SQLite rows, item source expansion, or cache keys.
-function provider:GetQuestMapPinsAsync(id, callback, limit)
+function provider:GetQuestMapPinsAsync(id, callback, limit, onPage)
   id = tonumber(id)
   if not id then
     if callback then callback(nil, "quest id is invalid") end
@@ -1328,7 +1349,20 @@ function provider:GetQuestMapPinsAsync(id, callback, limit)
       end
       questMapPinCache[cacheKey] = result
       if callback then callback(result, nil) end
-    end, limit)
+    end, limit, onPage and function(records)
+      local result = {
+        id = id, title = quest.title, objective = quest.objective, description = quest.description,
+        level = quest.level, minLevel = quest.minLevel, pins = {}, hasObjectives = false, partial = true,
+      }
+      for _, row in ipairs(records or {}) do
+        if row.phase == "obj" then result.hasObjectives = true end
+        if row.zoneID and row.x and row.y then
+          row.title = row.title or (row.targetKind .. " " .. row.targetID)
+          table.insert(result.pins, row)
+        end
+      end
+      if table.getn(result.pins) > 0 then onPage(result) end
+    end or nil)
   end)
 end
 

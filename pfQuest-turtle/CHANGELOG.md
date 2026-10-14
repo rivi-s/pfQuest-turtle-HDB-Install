@@ -1,5 +1,13 @@
 # pfQuest Turtle patch notes
 
+## 0.2.0-beta.4 — 2026-10-14
+
+- Removed the overriding Turtle prerequisite from Q2975 so the Feralas breadcrumb correction also applies to the combined dataset.
+- Prepared continent pins in bounded background batches after zone work, preferring the current continent.
+- Corrected same-name quest-stage tooltip selection and finished-quota nameplate matching.
+- Removed the incorrect prerequisite from Q41368 Reminiscent of Steel.
+- Added the separate optional pfQuest-turtle-HDB-ruRU 0.1.0 language pack: Russian quest text, settings, tracker, browser, journal, welcome screen and pfQuest tooltip displays on English clients. Missing translations fall back to English.
+
 ## 0.2.0-beta.3 — 2026-10-10
 
 - Quest-category filters refresh when saved; tooltips explain the repeatable-quest requirement.

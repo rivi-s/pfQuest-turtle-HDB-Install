@@ -445,11 +445,14 @@ function pfMap:ShowTooltip(meta, tooltip)
     local activeQuest = metaQuestID and pfQuest.questlog and pfQuest.questlog[metaQuestID]
     -- scan all quest entries for matches
     for qid = 1, GetNumQuestLogEntries() do
-      local qtitle, _, _, _, _, complete = compat.GetQuestLogTitle(qid)
+      local qtitle, _, _, header, _, complete = compat.GetQuestLogTitle(qid)
 
-      local questMatches = meta["qlogid"] and meta["qlogid"] == qid
-        or (not meta["qlogid"] and activeQuest and activeQuest.qlogid == qid)
-        or (not meta["qlogid"] and not metaQuestID and meta["quest"] == qtitle)
+      -- Marker metadata can retain a positional row after accept/turn-in.
+      -- The active quest cache owns the current binding; never read a stale
+      -- marker row in preference to it, or a header/unrelated quest's progress.
+      local boundRow = activeQuest and activeQuest.qlogid or meta["qlogid"]
+      local questMatches = not header and qtitle == meta["quest"]
+        and ((boundRow and boundRow == qid) or (not boundRow and not metaQuestID))
       if questMatches then
         -- handle active quests
         local objectives = GetNumQuestLeaderBoards(qid)
@@ -867,6 +870,12 @@ function pfMap:AddNode(meta)
       for key, value in pairs(meta) do variant[key] = value end
       variant.item = { [1] = item }
       existing.questVariants[meta.questid] = variant
+      -- Same-title chain stages share the visual node, not its item list or
+      -- drop rate. Merging here gives later items the first stage's chance.
+      pfMap.dirtyNodes[pfMap.nodes[addon][map][coords]] = true
+      pfMap.dirtyMinimapNodes[pfMap.nodes[addon][map][coords]] = true
+      pfMap.dirtyMaps[map] = true
+      return
     end
     if item and table.getn(pfMap.nodes[addon][map][coords][title].item) > 0 then
       -- check if item already exists
@@ -1028,6 +1037,9 @@ function pfMap:GetNodes(addon, title)
 end
 
 function pfMap:DeleteNode(addon, title)
+  if (not addon or addon == "PFQUEST") and pfDatabase and pfDatabase.InvalidateQuestHDBPins then
+    pfDatabase:InvalidateQuestHDBPins(title)
+  end
   if addon == "PFQUEST" and title then unifiedcache[title] = nil end
   if not addon then
     -- wipe everything
@@ -1180,9 +1192,12 @@ function pfMap:NodeEnter()
   tooltip:AddDoubleLine(pfQuest_Loc["Respawn"] .. ":", (this.respawn or UNKNOWN), 0.8, 0.8, 0.8, 1, 1, 1)
 
   for title, meta in pairs(this.node) do
-    pfMap:ShowTooltip(meta, tooltip)
-    for _, variant in pairs(meta.questVariants or {}) do
-      pfMap:ShowTooltip(variant, tooltip)
+    local selected = pfMap:GetActiveQuestVariant(meta)
+    pfMap:ShowTooltip(selected, tooltip)
+    if selected == meta and not (meta.questid and pfQuest.questlog[tonumber(meta.questid)]) then
+      for _, variant in pairs(meta.questVariants or {}) do
+        pfMap:ShowTooltip(variant, tooltip)
+      end
     end
   end
 
@@ -1664,6 +1679,54 @@ function pfMap:GetPlayerMapID()
 
   -- Fallback for the short period before the first zone-change event fires.
   return GetRealZoneText and pfMap:GetMapIDByName(GetRealZoneText()) or nil
+end
+
+local hdbZoneContinents = {
+    [1] = 2, [3] = 2, [4] = 2, [8] = 2, [10] = 2, [11] = 2, [12] = 2, [28] = 2,
+    [33] = 2, [36] = 2, [38] = 2, [40] = 2, [41] = 2, [44] = 2, [45] = 2, [46] = 2,
+    [47] = 2, [51] = 2, [85] = 2, [130] = 2, [139] = 2, [267] = 2, [1497] = 2,
+    [1519] = 2, [1537] = 2,
+    [14] = 1, [15] = 1, [16] = 1, [17] = 1, [141] = 1, [148] = 1, [215] = 1,
+    [331] = 1, [357] = 1, [361] = 1, [400] = 1, [405] = 1, [406] = 1, [440] = 1,
+    [490] = 1, [493] = 1, [618] = 1, [1377] = 1, [1637] = 1, [1638] = 1, [1657] = 1,
+}
+function pfMap:GetHDBRegionOrderSQL()
+  local zone = tonumber(self:GetPlayerMapID())
+  if not zone then return "" end
+  zone = math.floor(zone)
+  self.hdbRegionOrderCache = self.hdbRegionOrderCache or {}
+  if self.hdbRegionOrderCache[zone] then return self.hdbRegionOrderCache[zone] end
+  local data = pfDB and pfDB.zones and pfDB.zones.data or {}
+  local function Continent(id, seen)
+    seen = seen or {}
+    if not id or seen[id] then return nil end
+    seen[id] = true
+    local value = self.GetHDBZoneContinent and self:GetHDBZoneContinent(id) or hdbZoneContinents[id]
+    if value then return value end
+    local parent = data[id] and tonumber(data[id][1])
+    if parent and parent ~= id then return Continent(parent, seen) end
+  end
+  local continent = Continent(zone)
+  local zones, listed = {}, {}
+  local function Add(id)
+    id = tonumber(id)
+    if id and not listed[id] and continent and Continent(id) == continent then
+      listed[id] = true
+      table.insert(zones, math.floor(id))
+    end
+  end
+  for id in pairs(hdbZoneContinents) do Add(id) end
+  for id in pairs(data) do Add(id) end
+  Add(zone)
+  table.sort(zones)
+  local coordinate = "COALESCE(s.zone_id,a.zone_id,z.map_id)"
+  local order = "CASE WHEN " .. coordinate .. "=" .. zone .. " THEN 0"
+  if table.getn(zones) > 0 then
+    order = order .. " WHEN " .. coordinate .. " IN (" .. table.concat(zones, ",") .. ") THEN 1"
+  end
+  order = order .. " ELSE 2 END,"
+  self.hdbRegionOrderCache[zone] = order
+  return order
 end
 
 function pfMap:CacheCurrentExploration(mapID)

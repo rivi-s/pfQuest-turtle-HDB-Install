@@ -172,6 +172,16 @@ local function GetCanonicalQuestTitle(id)
   return locale and locale.T or nil
 end
 
+-- Quest-log headers give a cheap startup hint without another SQL query.
+function pfQuest:GetQuestZonePriority(id)
+  local state = self.questlog and self.questlog[tonumber(id) or id]
+  local header = state and state.zoneHeader
+  if not header then return 0 end
+  local zone = GetRealZoneText and GetRealZoneText() or GetZoneText and GetZoneText()
+  if header == zone or (GetZoneText and header == GetZoneText()) then return 1 end
+  return 0
+end
+
 -- Helper to add to queue with count tracking
 local function queueAdd(entry)
   insert(pfQuest.queue, entry)
@@ -415,8 +425,13 @@ pfQuest:SetScript("OnUpdate", function()
     return
   end
 
-  -- process queue
-  for id, entry in pairs(this.queue) do
+  -- Submit current-zone quests first without starving the remaining log.
+  local selected = pfQuestHDBWork:SelectJob(this.queue, function(_, entry)
+    if entry[4] == "REMOVE" or entry[4] == "REINDEX" then return 2 end
+    return this:GetQuestZonePriority(entry[2])
+  end, "quest-priority")
+  local queueBatch = selected and { [selected] = this.queue[selected] } or this.queue
+  for id, entry in pairs(queueBatch) do
     -- HDB can update one accepted quest from its cached starter set. The Lua
     -- fallback still needs the established complete refresh.
     if entry[4] == "NEW" then
@@ -525,18 +540,25 @@ pfQuest:SetScript("OnUpdate", function()
 
       -- update quest nodes
       if pfQuest_config["trackingmethod"] ~= 4 then
-        -- delete node by title
-        local t0 = GetTime()
-        pfMap:DeleteNode("PFQUEST", entry[1])
+        local reusePins = entry[4] == "RELOAD"
+          and pfQuest_config["trackingmethod"] ~= 3
+          and (pfQuest_config["trackingmethod"] ~= 2 or IsQuestWatched(entry[3]))
+          and pfDatabase:CanReuseQuestHDBPins(entry[2], entry[3])
+        if not reusePins then
+          -- delete node by title
+          local t0 = GetTime()
+          pfMap:DeleteNode("PFQUEST", entry[1])
 
-        -- delete nodes by quest ids for servers with different names
-        local canonicalTitle = GetCanonicalQuestTitle(entry[2])
-        if canonicalTitle then pfMap:DeleteNode("PFQUEST", canonicalTitle) end
-        pfQuest:Debug(format("|cffffff00TIMER DeleteNode(NEW/RELOAD): %.4fs", GetTime() - t0))
+          -- delete nodes by quest ids for servers with different names
+          local canonicalTitle = GetCanonicalQuestTitle(entry[2])
+          if canonicalTitle then pfMap:DeleteNode("PFQUEST", canonicalTitle) end
+          pfQuest:Debug(format("|cffffff00TIMER DeleteNode(NEW/RELOAD): %.4fs", GetTime() - t0))
+        end
 
         -- skip quest objective detection on manual and tracked mode
         if
-          pfQuest_config["trackingmethod"] ~= 3
+          not reusePins
+          and pfQuest_config["trackingmethod"] ~= 3
           and (pfQuest_config["trackingmethod"] ~= 2 or IsQuestWatched(entry[3]))
         then
           local meta = { ["addon"] = "PFQUEST", ["qlogid"] = entry[3] }
@@ -561,6 +583,10 @@ pfQuest:SetScript("OnUpdate", function()
           pfQuest:Debug(format("|cffff8800TIMER SearchQuestID: %.4fs", GetTime() - t1))
         end
       end
+    end
+
+    if pfDatabase:QuestChangesBreadcrumbAvailability(entry[2]) then
+      this.needsQuestGiverUpdate = true
     end
 
     -- remove entry from queue and decrement counter
@@ -620,12 +646,14 @@ function pfQuest:UpdateQuestlog()
   local _, numQuests = GetNumQuestLogEntries()
   local found = 0
   local change = nil
+  local zoneHeader
 
   -- iterate over all quests
   for qlogid = 1, 40 do
     local title, _, _, header, _, complete = compat.GetQuestLogTitle(qlogid)
     local objectives = GetNumQuestLeaderBoards(qlogid)
     local watched, questid, state
+    if title and header then zoneHeader = title end
 
     if title and not header then
       -- A legacy same-title lookup can select hidden quest rows. While the
@@ -697,6 +725,7 @@ function pfQuest:UpdateQuestlog()
         pfQuest.questlog_tmp[questid] = pfQuest.questlog[questid]
       end
 
+      pfQuest.questlog_tmp[questid].zoneHeader = zoneHeader
       found = found + 1
       if found >= numQuests then
         break

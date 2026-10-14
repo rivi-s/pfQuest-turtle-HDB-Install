@@ -1955,7 +1955,33 @@ function pfDatabase:SearchQuest(quest, meta, partial)
   return maps
 end
 
+-- Optional introductions stop being offered while their destination is
+-- active or completed. Abandonment restores them when no completion is saved.
+local breadcrumbDestinations = { [2981] = 2975 }
+function pfDatabase:IsBreadcrumbBlocked(id)
+  local destination = breadcrumbDestinations[tonumber(id)]
+  return destination and ((pfQuest.questlog and pfQuest.questlog[destination])
+    or pfQuest_history[destination]) and true or false
+end
+
+function pfDatabase:QuestChangesBreadcrumbAvailability(id)
+  id = tonumber(id)
+  for _, destination in pairs(breadcrumbDestinations) do
+    if destination == id then return true end
+  end
+  return false
+end
+
+-- Retain old quest records for lookup/history, but do not advertise offers
+-- confirmed absent from the current server.
+local unavailableQuestOffers = { [6221] = true }
+function pfDatabase:IsQuestOfferExcluded(id)
+  return unavailableQuestOffers[tonumber(id)] and true or false
+end
+
 function pfDatabase:QuestFilter(id, plevel, pclass, prace)
+  if pfDatabase:IsQuestOfferExcluded(id) then return end
+  if self:IsBreadcrumbBlocked(id) then return end
   -- fast reject: race, class, and missing loc name are session-constants,
   -- pre-computed in BuildStaticRejectSet to avoid repeating bit ops per call
   if pfDatabase.staticRejectSet[id] then

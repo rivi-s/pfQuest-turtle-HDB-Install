@@ -1,5 +1,14 @@
 # pfQuest base patch notes
 
+## 0.2.0-beta.4 — 2026-10-14
+
+- Prioritized current-zone quest work and streamed target locations progressively while preserving complete provider caches.
+- Retained unchanged markers during ordinary quest progress to reduce update hitches.
+- Corrected tooltip quest-row bindings after accepting or turning in quests, and protected tracker row identities.
+- Made same-name quest matching tolerate sentence-spacing differences, including Battle of Hillsbrad.
+- Separated same-name chain-stage item data so map tooltips retain the correct drop chance.
+- Corrected Feralas breadcrumb availability and excluded obsolete Q6221 offers.
+
 ## 0.2.0-beta.3 — 2026-10-10
 
 - Map and minimap appearance settings now refresh existing markers when Save & Close is pressed, including tracking pictures, cut-out circles and spawn colors.

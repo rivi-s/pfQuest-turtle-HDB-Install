@@ -662,6 +662,24 @@ end
 -- display). Cleared at the start of each ButtonEvent invocation.
 local board_cache = {}
 
+-- Quest-log row numbers can shift before the asynchronous node refresh.
+-- Never render a zone header or a different quest through a stale binding.
+local function ResolveTrackerQuestRow(title, index)
+  if index and index > 0 then
+    local rowTitle, _, _, header = compat.GetQuestLogTitle(index)
+    if rowTitle == title and not header then return index end
+  end
+  local match
+  for row = 1, GetNumQuestLogEntries() do
+    local rowTitle, _, _, header = compat.GetQuestLogTitle(row)
+    if rowTitle == title and not header then
+      if match then return nil end -- duplicate titles need canonical identity
+      match = row
+    end
+  end
+  return match
+end
+
 function tracker.ButtonEvent(self)
   local self = self or this
   local title = self.title
@@ -712,9 +730,16 @@ function tracker.ButtonEvent(self)
         if active and active.title == title then qlogid = active.qlogid break end
       end
     end
-    qlogid = qlogid or 0
+    qlogid = ResolveTrackerQuestRow(title, qlogid)
+    if not qlogid then
+      self:SetHeight(0)
+      self.contentPending = true
+      return
+    end
     local qtitle, level, tag, header, collapsed, complete = compat.GetQuestLogTitle(qlogid)
-    if not qlogid or not qtitle then
+    if not qtitle or header or qtitle ~= title then
+      self:SetHeight(0)
+      self.contentPending = true
       return
     end
     local resolvedQID = ResolveUniqueStaticQuestID(qid, title)

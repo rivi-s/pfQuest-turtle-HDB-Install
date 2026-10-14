@@ -20,6 +20,25 @@ function pfQuestHDBWork:Claim(key)
   return true
 end
 
+-- Prefer current-zone work, reserving every fourth turn for background jobs.
+function pfQuestHDBWork:SelectJob(jobs, score, lane)
+  self.priorityStreaks = self.priorityStreaks or {}
+  local preferred, background, preferredScore
+  for key, job in pairs(jobs) do
+    local value = score(key, job)
+    if value and value > 0 then
+      if not preferred or value > preferredScore then preferred, preferredScore = key, value end
+    elseif value == 0 and not background then background = key end
+  end
+  local streak = self.priorityStreaks[lane] or 0
+  if background and (not preferred or streak >= 3) then
+    self.priorityStreaks[lane] = 0
+    return background
+  end
+  if preferred then self.priorityStreaks[lane] = streak + 1 end
+  return preferred
+end
+
 -- Optional first integration for the vanilla HDB edition. It deliberately
 -- replaces only active-quest map lookup; all normal pfQuest data stays loaded
 -- and the original search remains the fallback until this path is proven.
@@ -135,6 +154,9 @@ local function NormalizeQuestIdentityText(value)
   value = tostring(value or "")
   value = string.gsub(value, "|c%x%x%x%x%x%x%x%x", " ")
   value = string.gsub(value, "|r", " ")
+  -- Some database exports concatenate sentences where the client inserts
+  -- spaces/newlines. Preserve words and punctuation, normalize only spacing.
+  value = string.gsub(value, "%s*([%.!?])%s*", "%1 ")
   value = string.gsub(value, "%s+", " ")
   value = string.gsub(value, "^%s+", "")
   value = string.gsub(value, "%s+$", "")
@@ -691,6 +713,7 @@ end
 -- quest. The normal pfQuest search and all UI consumers remain unchanged until
 -- each of them can read this cache directly.
 local activeQuestCache = {}
+local activeQuestLoads = {}
 local function GetActiveQuestCache()
   if pfQuest then
     pfQuest.hdbActiveQuestCache = pfQuest.hdbActiveQuestCache or activeQuestCache
@@ -737,7 +760,24 @@ function pfDatabase:RefreshQuestHDBState(id, qlogid)
 end
 
 function pfDatabase:StoreQuestHDBCache(id, qlogid, result)
+  local previous = GetActiveQuestCache()[id]
   local targets, spawns, itemIDsByName = IndexPins(result.pins)
+  if result.partial and previous and previous.qlogid == qlogid then
+    for _, pin in ipairs(result.pins or {}) do table.insert(previous.pins, pin) end
+    for kind, ids in pairs(targets) do
+      previous.targets[kind] = previous.targets[kind] or {}
+      for target in pairs(ids) do previous.targets[kind][target] = true end
+    end
+    for kind, ids in pairs(spawns) do
+      previous.spawns[kind] = previous.spawns[kind] or {}
+      for target in pairs(ids) do previous.spawns[kind][target] = true end
+    end
+    for title, itemID in pairs(itemIDsByName) do previous.itemIDsByName[title] = itemID end
+    previous.hasObjectives = previous.hasObjectives or result.hasObjectives
+    previous.loading = true
+    self:RefreshQuestHDBState(id, qlogid)
+    return previous
+  end
   local _, liveLevel = compat.GetQuestLogTitle(qlogid)
   local record = {
     id = id,
@@ -753,6 +793,13 @@ function pfDatabase:StoreQuestHDBCache(id, qlogid, result)
     itemIDsByName = itemIDsByName,
     loadedAt = GetTime(),
   }
+  if previous and previous.loading and previous.qlogid == qlogid then
+    -- Final publication upgrades the same object, so an in-flight render
+    -- retains its cursor instead of deleting and drawing all earlier pages.
+    for key, value in pairs(record) do previous[key] = value end
+    record = previous
+  end
+  record.loading = result.partial and true or nil
   GetActiveQuestCache()[id] = record
   pfDatabase:RefreshQuestHDBState(id, qlogid)
   if pfQuest.tracker and pfQuest.tracker.buttons then
@@ -785,6 +832,7 @@ function pfDatabase:PrimeQuestHDBCache(id, meta)
 end
 
 function pfDatabase:ClearQuestHDBCache(id)
+  activeQuestLoads[id] = nil
   GetActiveQuestCache()[id] = nil
 end
 
@@ -794,8 +842,10 @@ end
 function pfDatabase:ReindexQuestHDBCache(id, qlogid)
   id, qlogid = tonumber(id), tonumber(qlogid)
   local record = id and GetActiveQuestCache()[id]
+  if id and activeQuestLoads[id] and qlogid and IsCurrentQuest(id, qlogid) then activeQuestLoads[id].qlogid = qlogid end
   if not record or not qlogid or not IsCurrentQuest(id, qlogid) then return false end
   record.qlogid = qlogid
+  if activeQuestLoads[id] then activeQuestLoads[id].qlogid = qlogid end
   local _, liveLevel = compat.GetQuestLogTitle(qlogid)
   record.level = tonumber(liveLevel) or record.level
   pfDatabase:RefreshQuestHDBState(id, qlogid)
@@ -816,12 +866,28 @@ end
 local pendingPinRenders = {}
 local pinRenderDriver
 local function QuestRenderToken(record)
-  local parts = { tostring(record.complete), tostring(pfQuest_config.currentquestgivers), tostring(pfQuest_config.mindropchance) }
+  local parts = { tostring(record.complete), tostring(record.level), tostring(record.minLevel), tostring(pfQuest_config.currentquestgivers), tostring(pfQuest_config.mindropchance) }
   for kind, states in pairs(record.states or {}) do
     for id, state in pairs(states) do table.insert(parts, kind .. tostring(id) .. state) end
   end
   table.sort(parts)
   return table.concat(parts, "|")
+end
+
+-- Counts may change without changing which objective locations are needed.
+function pfDatabase:CanReuseQuestHDBPins(id, qlogid)
+  if not Enabled() then return false end
+  local record = GetActiveQuestCache()[tonumber(id)]
+  if not record or record.loadFailed or record.qlogid ~= qlogid or record.renderedQlogid ~= qlogid
+      or pendingPinRenders[tonumber(id)] or not IsCurrentQuest(id, qlogid) then return false end
+  self:RefreshQuestHDBState(id, qlogid)
+  return record.renderedPinCount == table.getn(record.pins) and record.renderedToken == QuestRenderToken(record)
+end
+
+function pfDatabase:InvalidateQuestHDBPins(title)
+  for _, record in pairs(GetActiveQuestCache()) do
+    if not title or record.title == title then record.renderedToken, record.renderedPinCount = nil, nil end
+  end
 end
 
 -- Bag moves can change client stack counts without changing item presence.
@@ -870,17 +936,22 @@ function pfDatabase:RenderQuestHDBCache(id, qlogid, replace)
   local record = GetActiveQuestCache()[id]
   if not record or record.qlogid ~= qlogid or not IsCurrentQuest(id, qlogid) then return false end
   pfDatabase:RefreshQuestHDBState(id, qlogid)
+  local token = QuestRenderToken(record)
+  local appendOnly = record.renderedToken == token and record.renderedQlogid == qlogid
+  local rendered = appendOnly and (record.renderedPinCount or 0) or 0
+  if appendOnly and rendered == table.getn(record.pins) and not pendingPinRenders[id] then return true end
+  if appendOnly then replace = false end
   local collect = record.itemIDsByName and next(record.itemIDsByName) and true or false
   if table.getn(record.pins) <= 200 and not collect then
     if replace then pfMap:DeleteNode("PFQUEST", record.title) end
-    RenderPinRange(id, qlogid, record, 1, table.getn(record.pins))
+    RenderPinRange(id, qlogid, record, rendered + 1, table.getn(record.pins))
+    record.renderedToken, record.renderedQlogid, record.renderedPinCount = token, qlogid, table.getn(record.pins)
     return true
   end
-  local token = QuestRenderToken(record)
   local pending = pendingPinRenders[id]
   if pending and pending.record == record and pending.token == token then return true end
   pendingPinRenders[id] = { record = record, qlogid = qlogid, token = token,
-    index = 1, replace = replace, collect = collect, readyAt = GetTime() + (collect and 0.25 or 0.1) }
+    index = rendered + 1, replace = replace, collect = collect, readyAt = GetTime() + (collect and 0.25 or 0.1) }
   pfDatabase.hdbPinsPending = true
   pinRenderDriver:Show()
   return true
@@ -894,6 +965,14 @@ function pfDatabase:ProcessQuestPinRenderBatch()
   end
   if not pfQuestHDBWork:Claim("pins") then return end
   for id, job in pairs(pendingPinRenders) do
+    if not IsCurrentQuest(id, job.qlogid) or GetActiveQuestCache()[id] ~= job.record then pendingPinRenders[id] = nil end
+  end
+  local selected = pfQuestHDBWork:SelectJob(pendingPinRenders, function(id, job)
+    if GetTime() < math.max(job.readyAt, job.collect and (self.questItemsSettleAt or 0) or 0) then return nil end
+    return pfQuest.GetQuestZonePriority and pfQuest:GetQuestZonePriority(id) or 0
+  end, "pin-priority")
+  local batch = selected and { [selected] = pendingPinRenders[selected] } or {}
+  for id, job in pairs(batch) do
     if not IsCurrentQuest(id, job.qlogid) or GetActiveQuestCache()[id] ~= job.record then
       pendingPinRenders[id] = nil
     elseif GetTime() >= math.max(job.readyAt, job.collect and (self.questItemsSettleAt or 0) or 0) then
@@ -909,6 +988,7 @@ function pfDatabase:ProcessQuestPinRenderBatch()
       RenderPinRange(id, job.qlogid, record, job.index, last)
       job.index = last + 1
       if job.index > table.getn(record.pins) then
+        record.renderedToken, record.renderedQlogid, record.renderedPinCount = job.token, job.qlogid, table.getn(record.pins)
         pendingPinRenders[id] = nil
         pfMap.queue_update = GetTime()
       end
@@ -943,7 +1023,9 @@ function pfDatabase:FilterHDBAvailableStartPins(pins)
   local plevel = UnitLevel("player")
   for index = 1, table.getn(pins or {}) do
     local pin = pins[index]
-    local eligible = pin.questID and not (pfQuest.questlog and pfQuest.questlog[pin.questID])
+    local eligible = pin.questID and not pfDatabase:IsQuestOfferExcluded(pin.questID)
+      and not pfDatabase:IsBreadcrumbBlocked(pin.questID)
+      and not (pfQuest.questlog and pfQuest.questlog[pin.questID])
       and not activeTitles[pin.quest]
       and (not pfQuest_history[pin.questID] or pin.repeatable)
       and (not pin.repeatable or pfQuest_config["showrepeatable"] == "1")
@@ -1142,7 +1224,8 @@ function pfDatabase:SearchQuestIDHDB(id, meta)
   if not IsCurrentQuest(id, qlogid) then return false end
 
   local record = GetActiveQuestCache()[id]
-  if record and record.qlogid == qlogid then
+  if record and not record.loadFailed and record.qlogid == qlogid then
+    if self:CanReuseQuestHDBPins(id, qlogid) then return true end
     pfDatabase:RenderQuestHDBCache(id, qlogid, true)
     -- Cached quests are the normal path for objective and completion updates.
     -- Rendering mutates the node database, but it must also wake the map's
@@ -1152,20 +1235,35 @@ function pfDatabase:SearchQuestIDHDB(id, meta)
     return true
   end
 
+  if activeQuestLoads[id] then
+    activeQuestLoads[id].qlogid = qlogid
+    return true
+  end
+  if record and record.loadFailed then GetActiveQuestCache()[id] = nil end
+  local load = { qlogid = qlogid }
+  activeQuestLoads[id] = load
   local accepted = pfQuestHearthDB:GetQuestMapPinsAsync(id, function(result, err)
-    if not IsCurrentQuest(id, qlogid) then return end
+    if activeQuestLoads[id] ~= load then return end
+    activeQuestLoads[id] = nil
+    local row = load.qlogid
+    if not IsCurrentQuest(id, row) then return end
     if err or not result then
-      -- HearthDB is optional: keep the established renderer as the safe
-      -- fallback whenever the native provider cannot answer.
-      pfDatabase:SearchQuestID(id, { addon = "PFQUEST", qlogid = qlogid })
+      local partial = GetActiveQuestCache()[id]
+      if partial and partial.loading then partial.loadFailed = true end
+      pfDatabase:SearchQuestID(id, { addon = "PFQUEST", qlogid = row })
       pfMap.queue_update = GetTime()
       return
     end
-
-    pfDatabase:StoreQuestHDBCache(id, qlogid, result)
-    pfDatabase:RenderQuestHDBCache(id, qlogid, true)
+    pfDatabase:StoreQuestHDBCache(id, row, result)
+    pfDatabase:RenderQuestHDBCache(id, row, true)
+    pfMap.queue_update = GetTime()
+  end, nil, function(page)
+    if activeQuestLoads[id] ~= load or not IsCurrentQuest(id, load.qlogid) then return end
+    pfDatabase:StoreQuestHDBCache(id, load.qlogid, page)
+    pfDatabase:RenderQuestHDBCache(id, load.qlogid, true)
     pfMap.queue_update = GetTime()
   end)
+  if not accepted and activeQuestLoads[id] == load then activeQuestLoads[id] = nil end
   return accepted and true or false
 end
 
@@ -1521,6 +1619,7 @@ end
 function pfDatabase:RestoreAbandonedQuestGiverHDB(id, meta)
   if not Enabled() then return false end
   id = tonumber(id)
+  if pfDatabase:IsQuestOfferExcluded(id) then return true end
   local cached = id and hdbQuestGiverPins[id]
   if pfQuest.TraceAbandon then
     pfQuest:TraceAbandon("RESTORE id=" .. tostring(id)

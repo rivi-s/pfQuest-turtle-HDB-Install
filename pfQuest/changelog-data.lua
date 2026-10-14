@@ -1,5 +1,13 @@
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest", {
+{ ["version"] = "0.2.0-beta.4", ["date"] = "2026-10-14", ["notes"] = {
+"Prioritized current-zone quest work and streamed target locations progressively while preserving complete provider caches.",
+"Retained unchanged markers during ordinary quest progress to reduce update hitches.",
+"Corrected tooltip quest-row bindings after accepting or turning in quests, and protected tracker row identities.",
+"Made same-name quest matching tolerate sentence-spacing differences, including Battle of Hillsbrad.",
+"Separated same-name chain-stage item data so map tooltips retain the correct drop chance.",
+"Corrected Feralas breadcrumb availability and excluded obsolete Q6221 offers."
+} },
 { ["version"] = "0.2.0-beta.3", ["date"] = "2026-10-10", ["notes"] = {
 "Map and minimap appearance settings now refresh existing markers when Save & Close is pressed, including tracking pictures, cut-out circles and spawn colors.",
 "Tracker font, opacity, level labels and default objective expansion apply immediately while preserving manually folded quests.",
