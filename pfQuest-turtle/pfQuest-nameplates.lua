@@ -101,7 +101,7 @@ local function ScanQuestObjectives()
         end
     end
 
-    if pfQuestHearthDB and type(pfQuestHearthDB.GetQuestTargetsAsync) == "function" then
+    if pfQuestHearthDB and type(pfQuestHearthDB.GetQuestObjectiveSummaryAsync or pfQuestHearthDB.GetQuestTargetsAsync) == "function" then
         local pending = 0
         for _ in pairs(activeQuests) do pending = pending + 1 end
         if pending == 0 then return unresolvedRows end
@@ -109,7 +109,8 @@ local function ScanQuestObjectives()
         for questId, activeObjectives in pairs(activeQuests) do
             local currentQuestId = questId
             local currentObjectives = activeObjectives
-            pfQuestHearthDB:GetQuestTargetsAsync(currentQuestId, function(records, err)
+            local GetObjectives = pfQuestHearthDB.GetQuestObjectiveSummaryAsync or pfQuestHearthDB.GetQuestTargetsAsync
+            GetObjectives(pfQuestHearthDB, currentQuestId, function(records, err)
                 if generation ~= objectiveScanGeneration then return end
                 if not err and records then
                     for _, target in ipairs(records) do

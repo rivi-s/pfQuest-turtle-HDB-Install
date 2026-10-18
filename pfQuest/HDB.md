@@ -30,3 +30,10 @@ tiny inactive load-on-demand stubs at both old addon paths for in-place updates.
 They are migration files, not required providers. Old tools/data left on disk
 are not used. Cleanup is recommended; untouched old addons may still print
 their own database-open failure messages.
+
+## HearthDB DLL compatibility
+
+The existing HearthDB DLL remains supported through bounded SQL paging. The
+optional experimental 0.4.1-exp.3 DLL enables incremental native result delivery;
+it is distributed separately and is not required to install this addon update.
+The development hitch profiler is not part of the addon package.

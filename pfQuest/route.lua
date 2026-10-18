@@ -355,7 +355,20 @@ pfQuest.route:SetScript("OnUpdate", function()
       automaticTargetKey = TargetKey(nearest)
     end
   end
-  -- Reorder only when the available route nodes or an explicit target change.
+  -- Movement can make an existing turn-in closer without changing the
+  -- candidate set. Reconsider only a clear improvement, keeping the same
+  -- half-unit tolerance used below to avoid position-jitter target flips.
+  if not targetTitle and this.coords[1] and this.coords[1][4] then
+    local currentDistance = this.coords[1][4]
+    for index = 2, table.getn(this.coords) do
+      local distance = this.coords[index][4]
+      if distance and distance + 0.5 < currentDistance then
+        this.recalculate = true
+        break
+      end
+    end
+  end
+  -- Reorder when candidates, explicit selection, or the nearer target change.
   -- Re-sorting every second while the player moves causes route flicker and
   -- expensive map redraws without improving the selected objective.
   if this.recalculate then
@@ -685,7 +698,7 @@ pfQuest.route.arrow:SetScript("OnUpdate", function()
       this.description:SetTextColor(1, 0.9, 0.7, 1)
       desc = string.gsub(desc, "ff33ffcc", "ffffffff")
     end
-    this.description:SetText(desc .. "|r.")
+    this.description:SetText(desc ~= "" and (desc .. "|r.") or "")
   end
 
   -- only refresh distance text on change

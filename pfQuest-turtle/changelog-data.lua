@@ -2,6 +2,15 @@
 if not pfQuestChangelog then return end
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest-turtle", {
+{ ["version"] = "0.2.0-beta.5", ["date"] = "2026-10-18", ["notes"] = {
+"Added a Felwood position fallback at the Timbermaw tunnel boundary when the client returns no tunnel coordinates.",
+"Added Nafien's tunnel position while retaining outdoor map locations.",
+"Restored Bloodsail Correspondence links, Galen's Escape Strongbox turn-in, Growlpaw objectives/turn-in, and P'li's missing name.",
+"Added Tanaris positions for Sandmoon Village NPCs while preserving their Thousand Needles positions.",
+"Added the Survival 225 availability requirement for To Survive in the Jungle.",
+"Shared compact objective data with nameplate and party-progress consumers instead of repeating full spawn queries.",
+"The optional Russian module remains version 0.1.0 and is distributed separately."
+} },
 { ["version"] = "0.2.0-beta.4", ["date"] = "2026-10-14", ["notes"] = {
 "Removed the overriding Turtle prerequisite from Q2975 so the Feralas main quest does not require its optional introduction.",
 "Prepared continent pins in bounded background batches after zone work, preferring the current continent.",

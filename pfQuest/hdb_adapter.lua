@@ -969,6 +969,9 @@ function pfDatabase:ProcessQuestPinRenderBatch()
   end
   local selected = pfQuestHDBWork:SelectJob(pendingPinRenders, function(id, job)
     if GetTime() < math.max(job.readyAt, job.collect and (self.questItemsSettleAt or 0) or 0) then return nil end
+    local pin = job.record.pins[job.index]
+    local map = pfMap and pfMap.GetPlayerMapID and pfMap:GetPlayerMapID()
+    if pin and map and pin.zoneID == map then return 2 end
     return pfQuest.GetQuestZonePriority and pfQuest:GetQuestZonePriority(id) or 0
   end, "pin-priority")
   local batch = selected and { [selected] = pendingPinRenders[selected] } or {}
@@ -1009,13 +1012,18 @@ pfDatabase.pinRenderDriver = pinRenderDriver
 -- Applies the dynamic player state that cannot be stored in the companion:
 -- active quests, completed history, prerequisite chains, and professions.
 -- This is intentionally renderer-neutral until it has parity coverage.
-function pfDatabase:FilterHDBAvailableStartPins(pins)
-  local visible = {}
-  local activeTitles = {}
+local function ActiveQuestTitles()
+  local titles = {}
   for key, state in pairs((pfQuest and pfQuest.questlog) or {}) do
-    if type(key) == "string" then activeTitles[key] = true end
-    if state and state.title then activeTitles[state.title] = true end
+    if type(key) == "string" then titles[key] = true end
+    if state and state.title then titles[state.title] = true end
   end
+  return titles
+end
+
+function pfDatabase:FilterHDBAvailableStartPins(pins, activeTitles)
+  local visible = {}
+  activeTitles = activeTitles or ActiveQuestTitles()
   local levelRange = pfQuest_config["questpinlevelrange"] or "off"
   if levelRange == "all" then levelRange = "off" end
   local threshold = ({ red = 5, orange = 4, yellow = 3, green = 2, gray = 1 })[levelRange]
@@ -1441,13 +1449,16 @@ starterDriver:SetScript("OnUpdate", function()
     pfMap.queue_update = GetTime()
     if job.index > table.getn(job.remove) then job.phase, job.index, job.pinIndex = "add", 1, 1 end
   else
+    -- The batch does not yield: active quest titles cannot change between its
+    -- pins. Share one snapshot instead of rebuilding it up to32 times.
+    local activeTitles = ActiveQuestTitles()
     local budget = 32
     while budget > 0 and job.index <= table.getn(job.order) do
       local id = job.order[job.index]
       local pins = job.visible[id]
       if pins and (job.refreshAppearance or not hdbQuestGiverSet[id] or job.pinIndex > 1) then
         -- Acceptance/turn-in can occur between batches; do not restore stale availability.
-        if not pfDatabase:FilterHDBAvailableStartPins({pins[job.pinIndex]})[1] then
+        if not pfDatabase:FilterHDBAvailableStartPins({pins[job.pinIndex]}, activeTitles)[1] then
           job.index, job.pinIndex = job.index + 1, 1
           budget = budget - 1
         else
@@ -1481,6 +1492,7 @@ function pfDatabase:SearchQuestGiversHDB(meta)
   local levelRange = pfQuest_config["questpinlevelrange"] or "off"
   if levelRange == "all" then levelRange = "off" end
   local options = {
+    isCurrent = function() return request == hdbQuestGiverRequest end,
     level = UnitLevel("player"),
     highOffset = pfQuest_config["showhighlevel"] == "1" and 3 or 0,
     includeLow = pfQuest_config["showlowlevel"] == "1",

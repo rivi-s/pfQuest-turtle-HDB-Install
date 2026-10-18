@@ -856,6 +856,10 @@ function pfMap:AddNode(meta)
           if container and container[title] == existing then
             pfMap.dirtyNodes[container] = true
             pfMap.dirtyMinimapNodes[container] = true
+            pfMap.hiddenPinRevision = (pfMap.hiddenPinRevision or 0) + 1
+            if pfMap.hiddenPinsReady == indexedMap then pfMap.hiddenPinsReady = nil end
+            pfMap.routeMapRevisions = pfMap.routeMapRevisions or {}
+            pfMap.routeMapRevisions[indexedMap] = (pfMap.routeMapRevisions[indexedMap] or 0) + 1
             pfMap.dirtyMaps[indexedMap] = true
           end
         end
@@ -874,6 +878,10 @@ function pfMap:AddNode(meta)
       -- drop rate. Merging here gives later items the first stage's chance.
       pfMap.dirtyNodes[pfMap.nodes[addon][map][coords]] = true
       pfMap.dirtyMinimapNodes[pfMap.nodes[addon][map][coords]] = true
+      pfMap.hiddenPinRevision = (pfMap.hiddenPinRevision or 0) + 1
+      if pfMap.hiddenPinsReady == map then pfMap.hiddenPinsReady = nil end
+      pfMap.routeMapRevisions = pfMap.routeMapRevisions or {}
+      pfMap.routeMapRevisions[map] = (pfMap.routeMapRevisions[map] or 0) + 1
       pfMap.dirtyMaps[map] = true
       return
     end
@@ -901,6 +909,10 @@ function pfMap:AddNode(meta)
             -- refresh so it can list every creature sharing this location.
             pfMap.dirtyNodes[pfMap.nodes[addon][map][coords]] = true
             pfMap.dirtyMinimapNodes[pfMap.nodes[addon][map][coords]] = true
+            pfMap.hiddenPinRevision = (pfMap.hiddenPinRevision or 0) + 1
+            if pfMap.hiddenPinsReady == map then pfMap.hiddenPinsReady = nil end
+            pfMap.routeMapRevisions = pfMap.routeMapRevisions or {}
+            pfMap.routeMapRevisions[map] = (pfMap.routeMapRevisions[map] or 0) + 1
             pfMap.dirtyMaps[map] = true
           end
           return
@@ -911,6 +923,10 @@ function pfMap:AddNode(meta)
       table.insert(pfMap.nodes[addon][map][coords][title].item, item)
       pfMap.dirtyNodes[pfMap.nodes[addon][map][coords]] = true
       pfMap.dirtyMinimapNodes[pfMap.nodes[addon][map][coords]] = true
+      pfMap.hiddenPinRevision = (pfMap.hiddenPinRevision or 0) + 1
+      if pfMap.hiddenPinsReady == map then pfMap.hiddenPinsReady = nil end
+      pfMap.routeMapRevisions = pfMap.routeMapRevisions or {}
+      pfMap.routeMapRevisions[map] = (pfMap.routeMapRevisions[map] or 0) + 1
       pfMap.dirtyMaps[map] = true
       return
     end
@@ -966,6 +982,10 @@ function pfMap:AddNode(meta)
   -- mark this coord's node table dirty so UpdateNodes knows to reprocess it
   pfMap.dirtyNodes[pfMap.nodes[addon][map][coords]] = true
   pfMap.dirtyMinimapNodes[pfMap.nodes[addon][map][coords]] = true
+  pfMap.hiddenPinRevision = (pfMap.hiddenPinRevision or 0) + 1
+  if pfMap.hiddenPinsReady == map then pfMap.hiddenPinsReady = nil end
+  pfMap.routeMapRevisions = pfMap.routeMapRevisions or {}
+  pfMap.routeMapRevisions[map] = (pfMap.routeMapRevisions[map] or 0) + 1
   pfMap.dirtyMaps[map] = true
 
   -- maintain reverse title index for O(1) DeleteNode
@@ -1037,6 +1057,11 @@ function pfMap:GetNodes(addon, title)
 end
 
 function pfMap:DeleteNode(addon, title)
+  self.hiddenPinRevision = (self.hiddenPinRevision or 0) + 1
+  if not addon or not title then
+    self.hiddenPinEpoch = (self.hiddenPinEpoch or 0) + 1
+    self.hiddenPinsReady = nil
+  end
   if (not addon or addon == "PFQUEST") and pfDatabase and pfDatabase.InvalidateQuestHDBPins then
     pfDatabase:InvalidateQuestHDBPins(title)
   end
@@ -1079,6 +1104,10 @@ function pfMap:DeleteNode(addon, title)
       -- Removing the last title at a coordinate still changes the route input.
       -- Always invalidate every affected map so automatic routing drops stale
       -- coordinates and selects the next active quest immediately.
+      pfMap.hiddenPinRevision = (pfMap.hiddenPinRevision or 0) + 1
+      if pfMap.hiddenPinsReady == map then pfMap.hiddenPinsReady = nil end
+      pfMap.routeMapRevisions = pfMap.routeMapRevisions or {}
+      pfMap.routeMapRevisions[map] = (pfMap.routeMapRevisions[map] or 0) + 1
       pfMap.dirtyMaps[map] = true
       if pfMap.nodes[addon] and pfMap.nodes[addon][map] then
         for coords in pairs(coords_set) do
@@ -1745,13 +1774,15 @@ local function RememberCurrentZoneQuest(map, title, node)
   pfMap.currentZoneTracker[map][questid] = title
 end
 
-function pfMap:UpdateNodes()
+function pfMap:UpdateNodes(initialRoute)
   pfQuest:Debug("Update Nodes")
 
   local color = pfQuest_config["spawncolors"] == "1" and "spawn" or "title"
   local map = pfMap:GetMapID(GetCurrentMapContinent(), GetCurrentMapZone())
   local playerMap = pfMap:GetPlayerMapID()
   local worldMapShown = WorldMapFrame:IsShown()
+  local routeOnly = type(initialRoute) == "table" and initialRoute.routeOnly
+  if routeOnly and (worldMapShown or initialRoute.map ~= playerMap) then return end
   -- Closing a manually selected zone can leave the client's map selection on
   -- that zone briefly. Hidden route/tracker work always belongs to the player.
   if not worldMapShown and playerMap then map = playerMap end
@@ -1770,9 +1801,10 @@ function pfMap:UpdateNodes()
   local i = 1
 
   -- Coalesce tracker content reads across all spawn points in this pass.
-  pfQuest.tracker.deferNodeContent = true
-  -- reset tracker
-  pfQuest.tracker.Reset()
+  if not routeOnly then
+    pfQuest.tracker.deferNodeContent = true
+    pfQuest.tracker.Reset()
+  end
 
   -- Continent and world views do not resolve to a zone map ID. Extensions can
   -- render their own pins there, but the core zone-node renderer must not use
@@ -1835,7 +1867,7 @@ function pfMap:UpdateNodes()
   -- spawn pin in every map refresh. Preserve their confirmed, map-scoped
   -- tracker entry in Current Zone Only mode. Entries vanish as soon as the
   -- quest is no longer active.
-  if tonumber(pfQuest_config["trackingmethod"]) == 5 and pfMap.currentZoneTracker and pfMap.currentZoneTracker[map] then
+  if not routeOnly and tonumber(pfQuest_config["trackingmethod"]) == 5 and pfMap.currentZoneTracker and pfMap.currentZoneTracker[map] then
     for questid, title in pairs(pfMap.currentZoneTracker[map]) do
       local quest = pfQuest.questlog and pfQuest.questlog[questid]
       if quest then
@@ -1864,16 +1896,17 @@ function pfMap:UpdateNodes()
   -- updater, and dirtyMaps keeps the full world-map render pending until the
   -- player actually opens it.
   if not worldMapShown then
-    local questNodes = pfMap.nodes.PFQUEST and pfMap.nodes.PFQUEST[map]
+    local route = routeOnly and initialRoute.routeSink or pfQuest.route
+    local questNodes = routeOnly and initialRoute.questNodes or (pfMap.nodes.PFQUEST and pfMap.nodes.PFQUEST[map])
     -- A login or asynchronous HDB load can establish lastRouteMap before the
     -- quest nodes arrive. Rebuild when nodes exist but the route is still
     -- empty, even if no later dirty-map flag survived the loading sequence.
-    local routeEmpty = not pfQuest.route.coords or table.getn(pfQuest.route.coords) == 0
-    local rebuildRoute = pfMap.lastRouteMap ~= map or pfMap.dirtyMaps[map]
+    local routeEmpty = not route.coords or table.getn(route.coords) == 0
+    local rebuildRoute = routeOnly or pfMap.lastRouteMap ~= map or pfMap.dirtyMaps[map]
       or (routeEmpty and questNodes and next(questNodes))
     if rebuildRoute then
-      pfQuest.route:Reset()
-      pfMap.lastRouteMap = map
+      route:Reset()
+      if not (routeOnly and initialRoute.routeSink) then pfMap.lastRouteMap = map end
     end
     local playerX, playerY = GetPlayerMapPosition("player")
     playerX, playerY = (playerX or 0) * 100, (playerY or 0) * 100
@@ -1891,9 +1924,11 @@ function pfMap:UpdateNodes()
       local routeLayer = 0
       for title, meta in pairs(node) do
         meta = pfMap:GetActiveQuestVariant(meta)
-        RememberCurrentZoneQuest(map, title, meta)
-        pfQuest.tracker.ButtonAdd(title, meta)
-        pfQuest.tracker.RegisterQuestPoint(title, meta, x, y)
+        if not routeOnly then
+          RememberCurrentZoneQuest(map, title, meta)
+          pfQuest.tracker.ButtonAdd(title, meta)
+          pfQuest.tracker.RegisterQuestPoint(title, meta, x, y)
+        end
 
         -- Select the same highest-priority entry that UpdateNode would bind to
         -- a visible map pin, but keep this path free of frame work.
@@ -1913,7 +1948,14 @@ function pfMap:UpdateNodes()
         if meta.spawn and not meta.texture
           and meta.QTYPE and string.find(meta.QTYPE, "OBJECTIVE", 1, true)
           and (meta.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0") then
-          table.insert(rawObjectiveCandidates, { x, y, meta, nil, true })
+          local hidden = routeOnly and (
+            pfQuest_config["routecluster"] ~= "1" or pfQuest_config["showspawn"] == "0"
+            or (pfQuest_config["showcluster"] == "0" and meta.cluster)
+            or (pfQuest_config["hideunexplored"] == "1"
+              and ((explorationHandled and not exploredBounds and not pfMap:IsMapVisited(map))
+                or not IsExploredPosition(exploredBounds, x, y))
+              and not pfMap:IsVisitedCityPosition(map, x, y)))
+          if not hidden then table.insert(rawObjectiveCandidates, { x, y, meta, nil, true }) end
         end
       end
 
@@ -1928,6 +1970,9 @@ function pfMap:UpdateNodes()
         -- its clusters.
         local routeEligible =
           (routeNode.addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
+          -- Service/tracking icons use the default layer too; they are not
+          -- quest starters. Only route to them after an explicit selection.
+          and (not routeNode.tracking or pfQuest.route.IsTarget(routeNode) or routeNode.arrow == true)
           and (
             (pfQuest_config["routecluster"] == "1" and (routeNode.layer >= 9 or rawObjective))
             or (pfQuest_config["routeender"] == "1" and routeNode.layer == 4)
@@ -1943,7 +1988,7 @@ function pfMap:UpdateNodes()
         hidden = hidden or (pfQuest_config["showspawn"] == "0" and not routeNode.texture)
         if routeEligible and not hidden then
           if not rawObjective then
-            pfQuest.route:AddPoint({ x, y, routeNode })
+            route:AddPoint({ x, y, routeNode })
           end
         end
       end
@@ -1959,7 +2004,7 @@ function pfMap:UpdateNodes()
     -- priority dance needed like above -- a PFPARTY node is always
     -- untextured/layer 1 by construction, with no competing textured or
     -- clustered entry to out-prioritize.
-    local partyNodes = pfMap.nodes.PFPARTY and pfMap.nodes.PFPARTY[map]
+    local partyNodes = routeOnly and initialRoute.partyNodes or (pfMap.nodes.PFPARTY and pfMap.nodes.PFPARTY[map])
     if partyNodes and pfQuest_config["showPartyQuestPinsRoutable"] ~= "0" then
       for coords, node in pairs(FilterBoundaryAliases(partyNodes)) do
         local x, y
@@ -1978,8 +2023,8 @@ function pfMap:UpdateNodes()
       end
     end
 
-    pfQuest.route:SetRawObjectiveCandidates(rawObjectiveCandidates)
-    if pfQuest.tracker and pfQuest.tracker.DoLayout then
+    route:SetRawObjectiveCandidates(rawObjectiveCandidates)
+    if not routeOnly and pfQuest.tracker and pfQuest.tracker.DoLayout then
       pfQuest.tracker.DoLayout()
     end
     -- This hidden pass updates the tracker, minimap inputs, and route only.
@@ -2091,6 +2136,9 @@ function pfMap:UpdateNodes()
         -- can lead to an objective that is hidden by fog or a display filter.
         local routeEligible =
           (pfMap.pins[i].addon ~= "PFPARTY" or pfQuest_config["showPartyQuestPinsRoutable"] ~= "0")
+          -- Service/tracking icons use the default layer too; they are not
+          -- quest starters. Only route to them after an explicit selection.
+          and (not pfMap.pins[i].tracking or pfQuest.route.IsTarget(pfMap.pins[i]) or pfMap.pins[i].arrow == true)
           and (
             (pfQuest_config["routecluster"] == "1" and pfMap.pins[i].layer >= 9)
             or (pfQuest_config["routeender"] == "1" and pfMap.pins[i].layer == 4)
@@ -2260,6 +2308,14 @@ function pfMap:UpdateMinimap()
   if not xPlayer or not yPlayer then return end
 
   xPlayer, yPlayer = xPlayer * 100, yPlayer * 100
+  -- Keep the map ID paired with the coordinates captured above. Zone names
+  -- can resolve to an outdoor parent while Turtle uses a separate tunnel map.
+  local mapID = pfMap.minimapMapID or pfMap:GetPlayerMapID()
+  if this.minimapRenderedMapID ~= mapID then
+    this.xPlayer, this.minimapAnchorAt = nil, nil
+    this.minimapAnchorX, this.minimapAnchorY = nil, nil
+    this.minimapRenderedMapID = mapID
+  end
 
   -- force refresh every second even without changed values, otherwise skip
   if this.xPlayer == xPlayer and this.yPlayer == yPlayer and this.mZoom == mZoom then
@@ -2272,8 +2328,6 @@ function pfMap:UpdateMinimap()
 
   this.xPlayer, this.yPlayer, this.mZoom = xPlayer, yPlayer, mZoom
   local color = pfQuest_config["spawncolors"] == "1" and "spawn" or "title"
-  local mapID = WorldMapFrame:IsShown() and pfMap.minimapMapID
-    or pfMap:GetMapIDByName(GetRealZoneText())
   local mapZoom = minimap_zoom[minimap_indoor()][mZoom]
   local mapWidth = minimap_sizes[mapID] and minimap_sizes[mapID][1] or 0
   local mapHeight = minimap_sizes[mapID] and minimap_sizes[mapID][2] or 0
@@ -2452,7 +2506,7 @@ function pfMap:UpdateMinimap()
 end
 
 local zone
-local function CapturePlayerMapID()
+local function CapturePlayerMapID(force)
   -- SetMapToCurrentZone gives city maps their own ID. Keep this independent of
   -- the map currently selected by the player in the World Map window.
   if WorldMapFrame:IsShown() then
@@ -2469,7 +2523,7 @@ local function CapturePlayerMapID()
   -- creates a WORLD_MAP_UPDATE burst and rebuilds the map for no benefit.
   -- Keep the existing map ID in that common movement path.
   local realMapID = GetRealZoneText and pfMap:GetMapIDByName(GetRealZoneText())
-  if realMapID and pfMap.playerMapID == realMapID then
+  if not force and realMapID and pfMap.playerMapID == realMapID then
     pfMap:MarkMapVisited(realMapID)
     return
   end
@@ -2485,12 +2539,14 @@ local function CapturePlayerMapID()
   end
 end
 
+pfMap:RegisterEvent("PLAYER_ENTERING_WORLD")
 pfMap:RegisterEvent("PLAYER_LOGIN")
 pfMap:RegisterEvent("ZONE_CHANGED")
 pfMap:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 pfMap:RegisterEvent("MINIMAP_ZONE_CHANGED")
 pfMap:RegisterEvent("WORLD_MAP_UPDATE")
 pfMap:SetScript("OnEvent", function()
+  if event == "WORLD_MAP_UPDATE" and pfMap.positionContextSwitching then return end
   -- Darnassus and other dense cities can emit MINIMAP_ZONE_CHANGED repeatedly
   -- while the player moves. Once the real map is known, do not even query map
   -- state for those cosmetic subarea notifications.
@@ -2502,7 +2558,14 @@ pfMap:SetScript("OnEvent", function()
   zone = GetCurrentMapZone()
 
   -- set map to current zone when possible
-  if event == "PLAYER_LOGIN" or event == "ZONE_CHANGED" or event == "ZONE_CHANGED_NEW_AREA" then
+  if event == "PLAYER_ENTERING_WORLD" then
+    -- PLAYER_LOGIN can run before the client has usable map coordinates.
+    -- Re-establish the map after entering the world, including cold logins.
+    CapturePlayerMapID(true)
+    pfMap.playerMapRecoveryAt = GetTime() + 0.5
+    pfMap.playerMapRecoveryTries = 0
+  elseif event == "PLAYER_LOGIN" or event == "ZONE_CHANGED" or event == "ZONE_CHANGED_NEW_AREA" then
+    pfMap.positionBoundaryFallback, pfMap.positionBoundaryCheckAt = nil, nil
     -- Read the map immediately after SetMapToCurrentZone. This preserves a
     -- capital's own map ID rather than replacing it with its parent zone.
     CapturePlayerMapID()
@@ -2579,17 +2642,20 @@ local hlstate, shiftstate, transition, hidecluster, fps, resetmap
 -- Prepare hidden zone-pin frames in bounded batches. This never reads the
 -- quest log or changes tracker/routes; the visible renderer remains authoritative.
 function pfMap:PrepareHiddenMapPins()
-  if WorldMapFrame:IsShown() or self.queue_update then
+  if WorldMapFrame:IsShown() then
     self.hiddenPinJob = nil
     return
   end
   local map = self:GetMapID(GetCurrentMapContinent(), GetCurrentMapZone())
   if not map or not self.dirtyMaps[map] then self.hiddenPinJob = nil; return end
+  local revision = self.routeMapRevisions and self.routeMapRevisions[map] or 0
+  local epoch = self.hiddenPinEpoch or 0
   local width, height = WorldMapButton:GetWidth(), WorldMapButton:GetHeight()
   if width <= 0 or height <= 0 then return end
   local job = self.hiddenPinJob
   if not job or job.map ~= map or job.width ~= width or job.height ~= height then
-    job = { map = map, width = width, height = height, index = 1, entries = {}, nodes = {} }
+    job = { map = map, width = width, height = height, index = 1, entries = {}, nodes = {},
+      revision = revision, epoch = epoch, appearance = self.appearanceRevision }
     for addon, maps in pairs(self.nodes) do
       for coords, node in pairs(maps[map] or {}) do
         table.insert(job.entries, coords)
@@ -2599,7 +2665,11 @@ function pfMap:PrepareHiddenMapPins()
     self.hiddenPinJob = job
     self.hiddenPinsReady = nil
   end
-  if job.finished then return end
+  if job.finished then
+    if job.revision == revision and job.epoch == epoch and job.appearance == self.appearanceRevision then return end
+    self.hiddenPinJob, self.hiddenPinsReady = nil, nil
+    return
+  end
   local stop = math.min(job.index + 5, table.getn(job.entries))
   local color = pfQuest_config["spawncolors"] == "1" and "spawn" or "title"
   for index = job.index, stop do
@@ -2647,29 +2717,202 @@ function pfMap:PrepareHiddenMapPins()
     job.cleanup = last + 1
     if job.cleanup > table.getn(self.pins) then
       job.finished = true
-      self.hiddenPinsReady = map
+      if job.revision == revision and job.epoch == epoch and job.appearance == self.appearanceRevision then
+        self.hiddenPinsReady = map
+      else
+        -- Finish a bounded sweep before resampling; streaming writes must not
+        -- repeatedly discard the first six pins and starve the rest of the zone.
+        self.hiddenPinJob, self.hiddenPinsReady = nil, nil
+      end
     end
   end
 end
 
+-- Sample local route inputs in bounded chunks while the full HDB load runs.
+-- Dense zones keep advancing instead of disabling the early-route attempt.
+function pfMap:TryInitialHDBRoute()
+  if not pfQuestHearthDB or not pfQuestHearthDB.embedded then self.initialHDBRouteStatus = "not-embedded" return false end
+  if WorldMapFrame:IsShown() then self.initialHDBRouteStatus = "map-open" return false end
+  if pfQuest_config.arrow ~= "1" or pfQuest_config.routes == "0" then self.initialHDBRouteStatus = "disabled" return false end
+  local route = pfQuest and pfQuest.route
+  if not route then self.initialHDBRouteStatus = "no-route-frame" return false end
+  local refreshing = (route.arrow and route.arrow:IsShown()) or (route.coords and next(route.coords))
+    or (route.rawObjectiveCandidates and next(route.rawObjectiveCandidates))
+  local now = GetTime()
+  if now < (self.initialHDBRouteRetryAt or 0) then return false end
+  self.initialHDBRouteRetryAt = now + 0.1
+  local map = self:GetPlayerMapID()
+  self.initialHDBRouteMap = map
+  if not map or not self.dirtyMaps[map] then self.initialHDBRouteStatus = "waiting-dirty-map" return false end
+  local quests = self.nodes.PFQUEST and self.nodes.PFQUEST[map]
+  local party = pfQuest_config.showPartyQuestPinsRoutable ~= "0"
+    and self.nodes.PFPARTY and self.nodes.PFPARTY[map] or nil
+  local revision = self.routeMapRevisions and self.routeMapRevisions[map] or 0
+  if refreshing and self.hiddenRouteMap == map and self.hiddenRouteRevision == revision
+    and self.hiddenRouteAppearance == self.appearanceRevision
+    and self.hiddenRouteQuests == quests and self.hiddenRouteParty == party then
+    self.initialHDBRouteStatus = "route-current"
+    return false
+  end
+  local job = self.initialHDBRouteJob
+  if not job or job.map ~= map or job.quests ~= quests or job.party ~= party or job.refreshing ~= not not refreshing then
+    job = {map = map, quests = quests, party = party, source = 1, refreshing = not not refreshing,
+      revision = revision, appearance = self.appearanceRevision}
+    if refreshing then
+      job.sink = {coords = {}, rawObjectiveCandidates = {}}
+      function job.sink:Reset() end -- each chunk contributes to one unpublished route
+      function job.sink:AddPoint(point) table.insert(self.coords, point) end
+      function job.sink:SetRawObjectiveCandidates(points)
+        for _, point in ipairs(points or {}) do table.insert(self.rawObjectiveCandidates, point) end
+      end
+    end
+    self.initialHDBRouteJob = job
+  end
+  local snapshot = {routeSink = job.sink, routeOnly = true, map = map, questNodes = {}, partyNodes = {}}
+  local coordinates, entries = 0, 0
+  while job.source <= 2 and coordinates < 32 and entries < 128 do
+    local source
+    if job.source == 1 then source = job.quests else source = job.party end
+    -- Lua next rejects a key deleted since the previous slice.
+    if job.cursor and (not source or not source[job.cursor]) then job.cursor = nil end
+    if job.resumeCoords and (not source or not source[job.resumeCoords]) then job.resumeCoords, job.metaCursor = nil, nil end
+    local coords, node
+    if job.resumeCoords then coords, node = job.resumeCoords, source[job.resumeCoords]
+    elseif source then coords, node = next(source, job.cursor) end
+    if not coords then
+      job.source, job.cursor = job.source + 1, nil
+    else
+      job.cursor = coords
+      coordinates = coordinates + 1
+      local copy = {}
+      if job.metaCursor and not node[job.metaCursor] then job.metaCursor = nil end
+      local title, meta = next(node, job.metaCursor)
+      while title and entries < 128 do
+        copy[title] = meta
+        entries = entries + 1
+        job.metaCursor = title
+        title, meta = next(node, title)
+      end
+      if title then job.resumeCoords = coords
+      else job.resumeCoords, job.metaCursor = nil, nil end
+      if next(copy) then
+        local target = job.source == 1 and snapshot.questNodes or snapshot.partyNodes
+        target[coords] = copy
+      end
+    end
+  end
+  local complete = job.source > 2
+  if complete and not refreshing then job.source, job.cursor = 1, nil end
+  self.initialHDBRouteCoordinates, self.initialHDBRouteEntries = coordinates, entries
+  if entries > 0 then self:UpdateNodes(snapshot) end
+  if refreshing then
+    self.initialHDBRouteStatus = "refreshing-local-route"
+    if complete then
+      self.initialHDBRouteJob = nil
+      -- A local write during the sweep requires a new snapshot. Other zones
+      -- do not invalidate this pass; their data can keep loading independently.
+      if job.revision ~= revision or job.appearance ~= self.appearanceRevision then return false end
+      route:Reset()
+      for _, point in ipairs(job.sink.coords) do route:AddPoint(point) end
+      route:SetRawObjectiveCandidates(job.sink.rawObjectiveCandidates)
+      self.hiddenRouteMap, self.hiddenRouteRevision, self.hiddenRouteAppearance = map, revision, self.appearanceRevision
+      self.hiddenRouteQuests, self.hiddenRouteParty = quests, party
+      self.initialHDBRouteStatus = "local-route-refreshed"
+      self.hiddenRouteRefreshedAt = GetTime()
+    end
+    return true
+  end
+  if entries == 0 then self.initialHDBRouteStatus = "waiting-local-nodes" return false end
+  self.initialHDBRouteStatus = "sampled-local-nodes"
+  return true
+end
+
+-- Extensions may supply an outdoor map for a custom map whose rectangle
+-- excludes part of its named zone. Use only coordinates returned by the client.
+function pfMap:ResolvePlayerPositionBoundary()
+  if WorldMapFrame:IsShown() or IsInInstance() then return end
+  local now = GetTime()
+  if now < (self.positionBoundaryCheckAt or 0) then return end
+  self.positionBoundaryCheckAt = now + 1
+  local state = self.positionBoundaryFallback
+  local preferred = state and state.preferred or self.playerMapID
+  local fallback = self.playerPositionFallbackMaps and self.playerPositionFallbackMaps[preferred]
+  if not fallback then self.positionBoundaryFallback = nil return end
+  local x, y = GetPlayerMapPosition("player")
+  local valid = x and y and (x ~= 0 or y ~= 0)
+  local selected = self:GetMapID(GetCurrentMapContinent(), GetCurrentMapZone())
+  if not state and valid then return end
+  -- A stationary player cannot cross the boundary. Avoid repeated map events.
+  if state and selected == fallback and valid and x == state.x and y == state.y then return end
+  self.positionContextSwitching = true
+  if state then self:SetMapByID(preferred) end
+  local px, py = GetPlayerMapPosition("player")
+  local map = preferred
+  if not px or not py or (px == 0 and py == 0) then
+    self:SetMapByID(fallback)
+    px, py = GetPlayerMapPosition("player")
+    map = fallback
+  end
+  local resolved = self:GetMapID(GetCurrentMapContinent(), GetCurrentMapZone())
+  if resolved ~= map or not px or not py or (px == 0 and py == 0) then
+    -- Neither map can locate the player: restore the original context.
+    if selected then self:SetMapByID(selected) end
+    self.positionContextSwitching = nil
+    return
+  end
+  self.positionContextSwitching = nil
+  if map == fallback then
+    self.positionBoundaryFallback = {preferred = preferred, x = px, y = py}
+  else self.positionBoundaryFallback = nil end
+  local changed = self.playerMapID ~= map
+  self.playerMapID = map
+  self.minimapMapID, self.minimapPlayerX, self.minimapPlayerY = map, px, py
+  self.playerMapRecoveryAt = nil
+  self:MarkMapVisited(map)
+  if changed then
+    -- Never combine tunnel route coordinates with an outdoor player position.
+    if pfQuest.route then pfQuest.route:Clear() end
+    self.lastRouteMap = nil
+    self.initialHDBRouteJob = nil
+    self.queue_update = now
+  end
+end
+
+-- Retry only the initial unresolved map context, never a map being browsed.
+-- Bounded retries avoid a WORLD_MAP_UPDATE loop at genuine map boundaries.
+function pfMap:RecoverInitialPlayerPosition()
+  if not self.playerMapRecoveryAt or GetTime() < self.playerMapRecoveryAt then return end
+  if WorldMapFrame:IsShown() then return end
+  if IsInInstance() then self.playerMapRecoveryAt = nil return end
+  local x, y = GetPlayerMapPosition("player")
+  if x and y and (x ~= 0 or y ~= 0) then
+    self.playerMapRecoveryAt = nil
+    return
+  end
+  self.playerMapRecoveryTries = (self.playerMapRecoveryTries or 0) + 1
+  -- Advance the guard before calling the map API, which emits map events.
+  self.playerMapRecoveryAt = self.playerMapRecoveryTries < 3 and (GetTime() + 1) or nil
+  CapturePlayerMapID(true)
+end
+
 local nodeUpdateDriver = CreateFrame("Frame", "pfQuestMapNodeUpdateDriver", UIParent)
 nodeUpdateDriver:SetScript("OnUpdate", function()
+  pfMap:ResolvePlayerPositionBoundary()
+  pfMap:RecoverInitialPlayerPosition()
   -- Keep preparation bounded to six pins per rendered frame, rather than
   -- six per50ms: dense zones otherwise need several seconds to get ready.
-  local preparingBusy = pfDatabase.hdbPinsPending or pfQuest and ((pfQuest.queueCount or 0) > 0
-    or pfQuest.updateQuestGivers or pfQuest.updateQuestLog)
-  if pfMap.queue_update or preparingBusy then
-    pfMap.hiddenPinJob = nil
-    pfMap.hiddenPinsReady = nil
-  elseif not WorldMapFrame:IsShown() then
+  if not WorldMapFrame:IsShown() then
     local map = pfMap:GetMapID(GetCurrentMapContinent(), GetCurrentMapZone())
     local job = pfMap.hiddenPinJob
-    local pending = map and pfMap.dirtyMaps[map] and not (job and job.finished)
+    local ready = job and job.finished and job.map == map
+      and job.revision == (pfMap.routeMapRevisions and pfMap.routeMapRevisions[map] or 0)
+      and job.epoch == (pfMap.hiddenPinEpoch or 0) and job.appearance == pfMap.appearanceRevision
+      and job.width == WorldMapButton:GetWidth() and job.height == WorldMapButton:GetHeight()
+    local pending = map and pfMap.dirtyMaps[map] and not ready
     if pending and (not pfQuestHDBWork or pfQuestHDBWork:Claim("map")) then
       pfMap:PrepareHiddenMapPins()
     elseif not pending and pfQuestHDBWork then pfQuestHDBWork:Release("map") end
-  end
-  if (WorldMapFrame:IsShown() or preparingBusy or pfMap.queue_update) and pfQuestHDBWork then
+  elseif pfQuestHDBWork then
     pfQuestHDBWork:Release("map")
   end
 
@@ -2677,10 +2920,11 @@ nodeUpdateDriver:SetScript("OnUpdate", function()
   this.throttle = GetTime() + 0.05
   pfMap:UpdateNodeTooltip()
 
+  local questBusy = pfDatabase.hdbPinsPending or pfQuest and ((pfQuest.queueCount or 0) > 0
+    or pfQuest.updateQuestGivers or pfQuest.updateQuestLog)
+  if questBusy then pfMap:TryInitialHDBRoute() end
   local renderDelay = WorldMapFrame:IsShown() and 0.05 or 0.25
   if pfMap.queue_update and pfMap.queue_update + renderDelay < GetTime() then
-    local questBusy = pfDatabase.hdbPinsPending or pfQuest and ((pfQuest.queueCount or 0) > 0
-      or pfQuest.updateQuestGivers or pfQuest.updateQuestLog)
     if not questBusy then
       pfMap.queue_update = nil
       -- Node changes must bypass the movement/zoom cache. UpdateNodes handles

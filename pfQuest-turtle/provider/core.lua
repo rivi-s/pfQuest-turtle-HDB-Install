@@ -2,12 +2,17 @@
 -- Embedded providers replace the legacy separate provider addon.
 local addon = CreateFrame("Frame")
 local provider = { embedded = true, databaseAddon = "pfQuest-turtle" }
+-- Experimental DLLs budget native conversion internally. Keep SQL paging as
+-- the fallback if the user restores the ordinary DLL.
+local singleQueryTargets = type(HDB_DumpDeliveryDiagnostics) == "function"
+provider.targetDeliveryMode = singleQueryTargets and "single-query" or "paged"
 local dbHandle
 local opened
 local shuttingDown
 local questTextCache = {}
 local questTargetCache = {}
 local questTargetPending = {}
+local questObjectiveCache = {}
 local targetDecodeJobs = {}
 local targetDecodeGeneration = 0
 local targetDecodeDriver = CreateFrame("Frame", "pfQuestHDBResultDecoder")
@@ -21,11 +26,21 @@ targetDecodeDriver:SetScript("OnUpdate", function()
   local selected = 1
   if pfQuestHDBWork and pfQuestHDBWork.SelectJob then
     selected = pfQuestHDBWork:SelectJob(targetDecodeJobs, function(_, job)
+      if job.localPriority and job.localPriority() then return 2 end
       return job.questID and pfQuest and pfQuest.GetQuestZonePriority and pfQuest:GetQuestZonePriority(job.questID) or 0
     end, "decode-priority") or 1
   end
-  local job = targetDecodeJobs[selected]
-  if job.run() then table.remove(targetDecodeJobs, selected) end
+  -- Rotate unfinished jobs within their priority group. Always taking the
+  -- first job let a large spawn result monopolize every background turn.
+  -- Remove before running: callbacks may enqueue work or clear the cache.
+  local job = table.remove(targetDecodeJobs, selected)
+  local generation = targetDecodeGeneration
+  local done
+  if type(provider.profileDecodeJob) == "function" then done = provider.profileDecodeJob(job, job.run)
+  else done = job.run() end
+  if not done and generation == targetDecodeGeneration then
+    table.insert(targetDecodeJobs, job)
+  end
   if not targetDecodeJobs[1] then
     if pfQuestHDBWork then pfQuestHDBWork:Release("decode") end
     targetDecodeDriver:Hide()
@@ -33,17 +48,19 @@ targetDecodeDriver:SetScript("OnUpdate", function()
 end)
 targetDecodeDriver:Hide()
 provider.targetDecodeDriver = targetDecodeDriver
-local function QueueTargetDecode(job, questID)
-  table.insert(targetDecodeJobs, { run = job, questID = questID })
+local function QueueTargetDecode(job, questID, localPriority, label)
+  table.insert(targetDecodeJobs, { run = job, questID = questID, localPriority = localPriority, label = label })
   targetDecodeDriver:Show()
 end
 local questMapPinCache = {}
 local questSearchCache = {}
 local questTitleIDCache = {}
+local questTitleIDIndex
 local questTitleByIDCache = {}
 local questTitleIDPreloaded
 local questTitleIDPreloading
 local questDisambiguationCache = {}
+local questDisambiguationIndex
 local questDisambiguationPreloaded
 local questDisambiguationPreloading
 local entityInfoCache = {}
@@ -99,13 +116,16 @@ local function ClearCache()
   targetDecodeGeneration = targetDecodeGeneration + 1
   questTextCache = {}
   questTargetCache = {}
+  questObjectiveCache = {}
   questMapPinCache = {}
   questSearchCache = {}
   questTitleIDCache = {}
+  questTitleIDIndex = nil
   questTitleByIDCache = {}
   questTitleIDPreloaded = nil
   questTitleIDPreloading = nil
   questDisambiguationCache = {}
+  questDisambiguationIndex = nil
   questDisambiguationPreloaded = nil
   questDisambiguationPreloading = nil
   entityInfoCache = {}
@@ -226,10 +246,12 @@ function provider:GetMetaRelationAsync(relation, callback, isCurrent)
   local handle = Open()
   if not handle or not relation then if callback then callback(nil, "HearthDB is unavailable") end return nil end
   local safe = string.gsub(relation, "'", "''")
+  -- Avoid the coordinate index: this join knows both kind and ID. SQLite
+  -- can otherwise choose a type-wide spawn scan for the ordered pages.
   local sql = "SELECT r.target_kind,r.target_id,r.value,e.title,m.level,s.zone_id,s.x,s.y,s.respawn FROM meta_relation r "
     .. "LEFT JOIN entity_text e ON e.locale='" .. CurrentLocale() .. "' AND e.target_kind=r.target_kind AND e.target_id=r.target_id "
     .. "LEFT JOIN entity_meta m ON m.target_kind=r.target_kind AND m.target_id=r.target_id "
-    .. "LEFT JOIN spawn s ON s.target_kind=r.target_kind AND s.target_id=r.target_id WHERE r.relation='" .. safe .. "'"
+    .. "LEFT JOIN spawn s INDEXED BY spawn_target_idx ON s.target_kind=r.target_kind AND s.target_id=r.target_id WHERE r.relation='" .. safe .. "'"
   -- Keep native Lua result delivery bounded; normalize each page before requesting more.
   sql = sql .. " ORDER BY 1,2,3,4,5,6,7,8,9"
   local records, offset, finished = {}, 0, false
@@ -257,6 +279,7 @@ function provider:GetMetaRelationAsync(relation, callback, isCurrent)
         for i = index, last do
           local r = rows[i]
           table.insert(records, {kind=r[1],id=tonumber(r[2]),value=r[3],title=r[4],level=r[5],zoneID=tonumber(r[6]),x=tonumber(r[7]),y=tonumber(r[8]),respawn=tonumber(r[9])})
+          rows[i] = nil
         end
         index = last + 1
         if index <= count then return false end
@@ -266,7 +289,7 @@ function provider:GetMetaRelationAsync(relation, callback, isCurrent)
         if callback then callback(records, nil) end
         return true
       end
-      if count > 128 then QueueTargetDecode(DecodeTrackingBatch)
+      if count > 128 then QueueTargetDecode(DecodeTrackingBatch, nil, nil, "tracking " .. relation)
       else DecodeTrackingBatch() end
     end)
     if not ok or not ticket then Fail("could not submit tracking query"); return nil end
@@ -512,8 +535,9 @@ function provider:GetQuestIDsByTitleAsync(title, callback)
     return nil
   end
   local cacheKey = CurrentLocale() .. ":title-id:" .. string.lower(title)
-  if questTitleIDCache[cacheKey] then
-    if callback then callback(questTitleIDCache[cacheKey], nil) end
+  local cached = questTitleIDIndex and questTitleIDIndex[cacheKey] or questTitleIDCache[cacheKey]
+  if cached then
+    if callback then callback(cached, nil) end
     return true
   end
   local safeTitle = (string.gsub(title, "'", "''"))
@@ -577,7 +601,8 @@ end
 
 function provider:GetCachedQuestIDsByTitle(title)
   if not title or title == "" then return nil, questTitleIDPreloaded end
-  return questTitleIDCache["enUS:title-id:" .. string.lower(title)], questTitleIDPreloaded
+  local key = "enUS:title-id:" .. string.lower(title)
+  return (questTitleIDIndex and questTitleIDIndex[key] or questTitleIDCache[key]), questTitleIDPreloaded
 end
 
 function provider:GetCachedQuestTitleByID(id)
@@ -594,40 +619,62 @@ function provider:PreloadQuestTitleIDsAsync(callback)
     if callback then callback(true, nil) end
     return true
   end
-  if questTitleIDPreloading then return true end
-  questTitleIDPreloading = true
+  if questTitleIDPreloading then
+    if callback then table.insert(questTitleIDPreloading.callbacks, callback) end
+    return true
+  end
+  local generation = targetDecodeGeneration
+  local request = {callbacks = {}}
+  if callback then table.insert(request.callbacks, callback) end
+  questTitleIDPreloading = request
+  local finished = false
+  local function IsCurrent()
+    return generation == targetDecodeGeneration and questTitleIDPreloading == request
+  end
+  local function Finish(err)
+    if finished then return end
+    finished = true
+    if questTitleIDPreloading == request then questTitleIDPreloading = nil end
+    local callbacks = request.callbacks
+    request.callbacks = {}
+    for _, done in ipairs(callbacks) do
+      local ok, message = pcall(done, not err and true or nil, err)
+      if not ok and type(geterrorhandler) == "function" then geterrorhandler()(message) end
+    end
+  end
   local batchSize, firstTicket = 256, nil
   local grouped = {}
+  local previousTitle, previousKey
   local function SubmitBatch(offset)
+    if not IsCurrent() then Finish("database cache changed during preload") return nil end
     local sql = "SELECT title, id FROM quest_text WHERE locale = 'enUS' ORDER BY title, id LIMIT "
       .. batchSize .. " OFFSET " .. offset
     local ok, ticket = pcall(HDB_QueryRawAsync, handle, sql, function(columns, rows, err)
-      if err then
-        questTitleIDPreloading = nil
-        HDB_ClearPoison(handle)
-        if callback then callback(nil, err) end
-        return
-      end
+      if err then HDB_ClearPoison(handle); Finish(err) return end
+      if not IsCurrent() then Finish("database cache changed during preload") return end
       local count = table.getn(rows or {})
       for index = 1, count do
         local row = rows[index]
-        local key = "enUS:title-id:" .. string.lower(row[1])
-        grouped[key] = grouped[key] or {}
+        if row[1] ~= previousTitle then
+          previousTitle = row[1]
+          previousKey = "enUS:title-id:" .. string.lower(row[1])
+        end
+        local key = previousKey
+        local ids = grouped[key]
+        if not ids then ids = {}; grouped[key] = ids end
         local id = tonumber(row[2])
-        table.insert(grouped[key], id)
+        table.insert(ids, id)
         questTitleByIDCache[id] = row[1]
+        rows[index] = nil
       end
       if count == batchSize then SubmitBatch(offset + batchSize); return end
-      for key, ids in pairs(grouped) do questTitleIDCache[key] = ids end
-      questTitleIDPreloading = nil
+      -- Publish the finished index by ownership transfer, without copying
+      -- every entry into a second hash table. On-demand lookups stay separate.
+      questTitleIDIndex = grouped
       questTitleIDPreloaded = true
-      if callback then callback(true, nil) end
+      Finish(nil)
     end)
-    if not ok or not ticket then
-      questTitleIDPreloading = nil
-      if callback then callback(nil, "could not submit quest title preload") end
-      return nil
-    end
+    if not ok or not ticket then Finish("could not submit quest preload") return nil end
     if not firstTicket then firstTicket = ticket end
     return ticket
   end
@@ -643,8 +690,9 @@ function provider:GetQuestDisambiguationAsync(title, callback)
     return nil
   end
   local cacheKey = CurrentLocale() .. ":disambiguation:" .. string.lower(title)
-  if questDisambiguationCache[cacheKey] then
-    if callback then callback(questDisambiguationCache[cacheKey], nil) end
+  local cached = questDisambiguationIndex and questDisambiguationIndex[cacheKey] or questDisambiguationCache[cacheKey]
+  if cached then
+    if callback then callback(cached, nil) end
     return true
   end
   local safeTitle = string.gsub(title, "'", "''")
@@ -700,10 +748,32 @@ function provider:PreloadQuestDisambiguationAsync(callback)
     if callback then callback(true, nil) end
     return true
   end
-  if questDisambiguationPreloading then return true end
-  questDisambiguationPreloading = true
-  local batchSize = 128
+  if questDisambiguationPreloading then
+    if callback then table.insert(questDisambiguationPreloading.callbacks, callback) end
+    return true
+  end
+  local generation = targetDecodeGeneration
+  local request = {callbacks = {}}
+  if callback then table.insert(request.callbacks, callback) end
+  questDisambiguationPreloading = request
+  local finished = false
+  local function IsCurrent()
+    return generation == targetDecodeGeneration and questDisambiguationPreloading == request
+  end
+  local function Finish(err)
+    if finished then return end
+    finished = true
+    if questDisambiguationPreloading == request then questDisambiguationPreloading = nil end
+    local callbacks = request.callbacks
+    request.callbacks = {}
+    for _, done in ipairs(callbacks) do
+      local ok, message = pcall(done, not err and true or nil, err)
+      if not ok and type(geterrorhandler) == "function" then geterrorhandler()(message) end
+    end
+  end
+  local batchSize, firstTicket = 128, nil
   local grouped = {}
+  local previousTitle, previousKey
   local baseSQL = [[SELECT q.title, d.quest_id, q.objective, q.description, d.objective_targets,
       d.prerequisites, d.level, d.race_mask, d.class_mask, d.resolution_class,
       (SELECT GROUP_CONCAT((CASE t.target_kind WHEN 'U' THEN 'monster' WHEN 'I' THEN 'item'
@@ -718,41 +788,37 @@ function provider:PreloadQuestDisambiguationAsync(callback)
     FROM quest_text q
     JOIN quest_disambiguation d ON d.locale = q.locale AND d.quest_id = q.id
     WHERE q.locale = 'enUS' ORDER BY q.title, d.quest_id]]
-  local firstTicket
   local function SubmitBatch(offset)
+    if not IsCurrent() then Finish("database cache changed during preload") return nil end
     local sql = baseSQL .. " LIMIT " .. batchSize .. " OFFSET " .. offset
     local ok, ticket = pcall(HDB_QueryRawAsync, handle, sql, function(columns, rows, err)
-      if err then
-        questDisambiguationPreloading = nil
-        HDB_ClearPoison(handle)
-        if callback then callback(nil, err) end
-        return
-      end
+      if err then HDB_ClearPoison(handle); Finish(err) return end
+      if not IsCurrent() then Finish("database cache changed during preload") return end
       local count = table.getn(rows or {})
       for index = 1, count do
         local row = rows[index]
-        local key = "enUS:disambiguation:" .. string.lower(row[1])
-        grouped[key] = grouped[key] or {}
-        table.insert(grouped[key], {
+        if row[1] ~= previousTitle then
+          previousTitle = row[1]
+          previousKey = "enUS:disambiguation:" .. string.lower(row[1])
+        end
+        local key = previousKey
+        local records = grouped[key]
+        if not records then records = {}; grouped[key] = records end
+        table.insert(records, {
           id = tonumber(row[2]), objective = row[3], description = row[4],
           objectiveTargets = row[5], prerequisites = row[6], level = row[7],
           raceMask = row[8], classMask = row[9], resolutionClass = row[10], objectiveLabels = row[11],
         })
+        rows[index] = nil
       end
-      if count == batchSize then
-        SubmitBatch(offset + batchSize)
-        return
-      end
-      for key, records in pairs(grouped) do questDisambiguationCache[key] = records end
-      questDisambiguationPreloading = nil
+      if count == batchSize then SubmitBatch(offset + batchSize); return end
+      -- Publish the finished index by ownership transfer, without copying
+      -- every entry into a second hash table. On-demand lookups stay separate.
+      questDisambiguationIndex = grouped
       questDisambiguationPreloaded = true
-      if callback then callback(true, nil) end
+      Finish(nil)
     end)
-    if not ok or not ticket then
-      questDisambiguationPreloading = nil
-      if callback then callback(nil, "could not submit quest disambiguation preload") end
-      return nil
-    end
+    if not ok or not ticket then Finish("could not submit quest preload") return nil end
     if not firstTicket then firstTicket = ticket end
     return ticket
   end
@@ -945,15 +1011,20 @@ end
 -- prerequisites, and profession checks before it renders any results.
 function provider:GetQuestStartPinsAsync(options, callback)
   options = options or {}
+  local function IsCurrent()
+    return not options.isCurrent or options.isCurrent()
+  end
+  if not IsCurrent() then return nil end
   if options.deliveryBatch then
     local pageSize = math.max(64, math.min(512, math.floor(tonumber(options.deliveryBatch) or 512)))
     local accumulated, finished = {}, false
     local function SubmitPage(offset)
+      if not IsCurrent() then finished = true return nil end
       local page = {}
       for key, value in pairs(options) do page[key] = value end
       page.deliveryBatch, page.deliveryLimit, page.deliveryOffset = nil, pageSize, offset
       return self:GetQuestStartPinsAsync(page, function(pins, err)
-        if finished then return end
+        if finished or not IsCurrent() then finished = true return end
         if err or not pins then
           finished = true
           if callback then callback(nil, err or "starter page missing") end
@@ -1036,6 +1107,10 @@ function provider:GetQuestStartPinsAsync(options, callback)
       .. " LIMIT " .. math.floor(options.deliveryLimit) .. " OFFSET " .. math.floor(options.deliveryOffset or 0)
   end
   local ok, ticket = pcall(HDB_QueryRawAsync, handle, sql, function(columns, rows, err)
+    if not IsCurrent() then
+      if err then HDB_ClearPoison(handle) end
+      return
+    end
     if err then
       HDB_ClearPoison(handle)
       if callback then callback(nil, err) end
@@ -1045,6 +1120,7 @@ function provider:GetQuestStartPinsAsync(options, callback)
     local count = table.getn(rows or {})
     local generation = targetDecodeGeneration
     local function DecodeStarterBatch()
+      if not IsCurrent() then return true end
       if generation ~= targetDecodeGeneration then
         if callback then callback(nil, "database changed during starter decode") end
         return true
@@ -1060,6 +1136,7 @@ function provider:GetQuestStartPinsAsync(options, callback)
         prerequisites = row[17], originKind = row[18], originID = tonumber(row[19]),
         chance = tonumber(row[20]), itemTitle = row[21], repeatable = row[22] == "1",
       })
+        rows[index] = nil
       end
       index = last + 1
       if index <= count then return false end
@@ -1070,7 +1147,7 @@ function provider:GetQuestStartPinsAsync(options, callback)
       end
       return true
     end
-    if count > 32 then QueueTargetDecode(DecodeStarterBatch)
+    if count > 32 then QueueTargetDecode(DecodeStarterBatch, nil, nil, "quest starters")
     else DecodeStarterBatch() end
   end)
   if not ok or not ticket then
@@ -1078,6 +1155,26 @@ function provider:GetQuestStartPinsAsync(options, callback)
     return nil
   end
   return ticket
+end
+
+-- Nameplates and party matching share the map's logical target request. The
+-- decoder builds a deduplicated identity view as it visits each spawn once.
+function provider:GetQuestObjectiveSummaryAsync(id, callback)
+  id = tonumber(id)
+  if not id then
+    if callback then callback(nil, "quest id is invalid") end
+    return nil
+  end
+  local key = CacheKey(id)
+  if questObjectiveCache[key] then
+    if callback then callback(questObjectiveCache[key], nil) end
+    return true
+  end
+  local generation = targetDecodeGeneration
+  return self:GetQuestTargetsAsync(id, function(_, err)
+    if generation ~= targetDecodeGeneration then err = "database cache changed during objective summary" end
+    if callback then callback(not err and questObjectiveCache[key] or nil, err) end
+  end)
 end
 
 function provider:GetQuestTargetsAsync(id, callback, limit, onPage)
@@ -1118,6 +1215,17 @@ function provider:GetQuestTargetsAsync(id, callback, limit, onPage)
     end
   end
 
+  -- Related objective sets are read-only in map/tooltip consumers. Share each
+  -- identical set within this query; shared spawn sets must stay independent.
+  local relatedObjectiveSets = {}
+  local function RelatedObjectiveSet(text)
+    if not text or text == "" then return nil end
+    if relatedObjectiveSets[text] then return relatedObjectiveSets[text] end
+    local names = {}
+    for title in string.gfind(text, "[^|]+") do names[title] = true end
+    relatedObjectiveSets[text] = names
+    return names
+  end
   local sql = [[WITH resolved_target AS (
       -- Keep original quest links for objective semantics.
       SELECT quest_id, phase, target_kind, target_id, target_kind AS origin_kind, target_id AS origin_id, NULL AS chance,
@@ -1185,13 +1293,18 @@ function provider:GetQuestTargetsAsync(id, callback, limit, onPage)
     WHERE q.quest_id = ]] .. id
 
 
-  -- Keep native Lua result delivery bounded; normalize each page before requesting more.
+  -- Ordinary DLL: page native results. Experimental DLL: one SQL execution,
+  -- with native conversion and Lua decoding still bounded across frames.
   -- Freeze this SQL order for the complete page chain: changing OFFSET order
   -- mid-request would duplicate or omit rows if the player changes zones.
-  local regionOrder = onPage and limit <= 0 and pfMap and pfMap.GetHDBRegionOrderSQL
+  local localMap = pfMap and pfMap.GetPlayerMapID and pfMap:GetPlayerMapID()
+  local regionOrder = limit <= 0 and pfMap and pfMap.GetHDBRegionOrderSQL
     and pfMap:GetHDBRegionOrderSQL() or ""
   sql = sql .. " ORDER BY " .. regionOrder .. "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18"
   local records, offset, finished = {}, 0, false
+  -- A positive LIMIT is only a prefix and must not publish a complete summary.
+  local objectives = limit <= 0 and {} or nil
+  local objectiveSeen = objectives and {} or nil
   pending.records = records
   local generation = targetDecodeGeneration
   local SubmitPage
@@ -1203,7 +1316,12 @@ function provider:GetQuestTargetsAsync(id, callback, limit, onPage)
   SubmitPage = function()
     if finished then return nil end
     local pageSize = limit > 0 and math.min(512, limit - offset) or 512
-    local pageSQL = sql .. " LIMIT " .. pageSize .. " OFFSET " .. offset
+    local pageSQL = sql
+    if singleQueryTargets then
+      if limit > 0 then pageSQL = sql .. " LIMIT " .. limit end
+    else
+      pageSQL = sql .. " LIMIT " .. pageSize .. " OFFSET " .. offset
+    end
     local ok, ticket = pcall(HDB_QueryRawAsync, handle, pageSQL, function(columns, rows, err)
       if err then
         HDB_ClearPoison(handle)
@@ -1212,52 +1330,102 @@ function provider:GetQuestTargetsAsync(id, callback, limit, onPage)
       end
 
       local index, pageRecords = 1, {}
+      local localPrefix = localMap and rows and rows[1] and tonumber(rows[1][12]) == localMap
+      local function LocalPriority()
+        return localMap and rows and rows[index] and tonumber(rows[index][12]) == localMap
+      end
       if generation ~= targetDecodeGeneration then Fail("database cache changed during paged query") return end
       local count = table.getn(rows or {})
+      local function EmitProgress()
+        local ready = pageRecords
+        pageRecords = {}
+        for _, progress in ipairs(pending.progress) do
+          local ok, message
+          if type(provider.profileDecodedCallback) == "function" then
+            ok, message = pcall(provider.profileDecodedCallback, "target preview", progress, ready)
+          else ok, message = pcall(progress, ready) end
+          if not ok and type(geterrorhandler) == "function" then geterrorhandler()(message) end
+        end
+      end
       local function DecodeBatch()
         if generation ~= targetDecodeGeneration then
           Fail("database cache changed during target decode")
           return true
         end
         local last = math.min(index + 31, count)
+        if type(provider.profileDecodePhase) == "function" then provider.profileDecodePhase("rows-begin", id, index, last, count) end
         for index = index, last do
         local row = rows[index]
-        local sharedSpawns = row[16] and row[16] ~= "" and {} or nil
-        for title in string.gfind(row[16] or "", "[^|]+") do sharedSpawns[title] = true end
-        local relatedObjectives = row[17] and row[17] ~= "" and {} or nil
-        for title in string.gfind(row[17] or "", "[^|]+") do relatedObjectives[title] = true end
-        table.insert(records, {
-          phase = row[1],
-          targetKind = row[2],
-          targetID = tonumber(row[3]),
-          originKind = row[4],
-          originID = tonumber(row[5]),
-          chance = tonumber(row[6]),
-          sourceKind = row[7], level = row[8],
-          rank = row[9], faction = row[18], x = tonumber(row[10]),
-          y = tonumber(row[11]), zoneID = tonumber(row[12]),
-          respawn = tonumber(row[13]), title = row[14], itemTitle = row[15],
-          sharedSpawns = sharedSpawns,
-          relatedObjectives = relatedObjectives,
-        })
-        table.insert(pageRecords, records[table.getn(records)])
+        local sharedSpawns
+        if row[16] and row[16] ~= "" then
+          sharedSpawns = {}
+          for title in string.gfind(row[16], "[^|]+") do sharedSpawns[title] = true end
         end
+        local relatedObjectives = RelatedObjectiveSet(row[17])
+        -- Consume the raw row in place instead of allocating a second table.
+        -- Capture fields before clearing positional cells; callers still receive
+        -- the same ordinary named-field record, with independent mutable sets.
+        local v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18 = row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11], row[12], row[13], row[14], row[15], row[16], row[17], row[18]
+        for column = 1, 18 do row[column] = nil end
+        row.phase = v1
+        row.targetKind = v2
+        row.targetID = tonumber(v3)
+        row.originKind = v4
+        row.originID = tonumber(v5)
+        row.chance = tonumber(v6)
+        row.sourceKind = v7
+        row.level = v8
+        row.rank = v9
+        row.faction = v18
+        row.x = tonumber(v10)
+        row.y = tonumber(v11)
+        row.zoneID = tonumber(v12)
+        row.respawn = tonumber(v13)
+        row.title = v14
+        row.itemTitle = v15
+        row.sharedSpawns = sharedSpawns
+        row.relatedObjectives = relatedObjectives
+        table.insert(records, row)
+        local record = records[table.getn(records)]
+        if objectives and record.phase == "obj" and (record.targetKind == "U" or record.targetKind == "O") and record.title then
+          -- Titles are keyed uniquely by locale/kind/id in the database.
+          local identity = v2 .. ":" .. v3 .. ":" .. v4 .. ":" .. v5
+          if not objectiveSeen[identity] then
+            objectiveSeen[identity] = true
+            table.insert(objectives, {phase = record.phase, targetKind = record.targetKind,
+              targetID = record.targetID, originKind = record.originKind, originID = record.originID,
+              title = record.title, itemTitle = record.itemTitle})
+          end
+        end
+        table.insert(pageRecords, record)
+        rows[index] = nil -- normalized record now owns every needed field
+        end
+        if type(provider.profileDecodePhase) == "function" then provider.profileDecodePhase("rows-end", id, index, last, count) end
         index = last + 1
+        -- Preserve progressive region-ordered previews without an 11000-row
+        -- progress callback at the end of the single-query decode.
+        -- Flush a short local prefix before spending turns on distant rows.
+        -- A decode slice may include up to31 rows beyond the zone boundary.
+        if singleQueryTargets and index <= count and
+          (table.getn(pageRecords) >= 512 or (localPrefix and not LocalPriority())) then
+          EmitProgress()
+        end
+        if localPrefix and not LocalPriority() then localPrefix = false end
+        if generation ~= targetDecodeGeneration then Fail("database cache changed during target progress") return true end
         if index <= count then return false end
         offset = offset + count
-        for _, progress in ipairs(pending.progress) do
-          local ok, message = pcall(progress, pageRecords)
-          if not ok and type(geterrorhandler) == "function" then geterrorhandler()(message) end
-        end
-        if count == pageSize and (limit <= 0 or offset < limit) then SubmitPage() return true end
+        EmitProgress()
+        if generation ~= targetDecodeGeneration then Fail("database cache changed during target progress") return true end
+        if not singleQueryTargets and count == pageSize and (limit <= 0 or offset < limit) then SubmitPage() return true end
         finished = true
         questTargetCache[cacheKey] = records
+        if objectives then questObjectiveCache[cacheKey] = objectives end
         if type(provider.profileDecodedCallback) == "function" then
           provider.profileDecodedCallback("target completion", Complete, records)
         else Complete(records, nil) end
         return true
       end
-      if count > 32 then QueueTargetDecode(DecodeBatch, id)
+      if count > 32 then QueueTargetDecode(DecodeBatch, id, LocalPriority, "quest targets q" .. id)
       else DecodeBatch() end
     end)
     if not ok or not ticket then
@@ -1374,20 +1542,54 @@ SlashCmdList.PFQUESTHDB = function(input)
     Print("HDB query cache cleared.")
   else
     Print("addon=pfQuest-turtle HearthDB=" .. tostring(Available()) .. ", open=" .. tostring(dbHandle ~= nil)
-      .. ". Use /pfqhdb cacheclear to clear query caches.")
+      .. ", targets=" .. provider.targetDeliveryMode .. ". Use /pfqhdb cacheclear to clear query caches.")
   end
 end
 
+-- Keep the broad indexes behind the active log's small on-demand identity
+-- lookups. Otherwise native delivery of preload pages delays every active ID.
+local startupPreloadDeadline, startupPreloadSettledAt, startupPreloadTick
+provider.startupPreloadState = "waiting-world"
 addon:RegisterEvent("PLAYER_LOGIN")
+addon:RegisterEvent("PLAYER_ENTERING_WORLD")
 addon:RegisterEvent("PLAYER_LOGOUT")
 addon:SetScript("OnEvent", function()
   if event == "PLAYER_LOGOUT" then
+    startupPreloadDeadline = nil
     Close()
-  else
+  elseif event == "PLAYER_LOGIN" then
     Open()
-    provider:PreloadQuestTitleIDsAsync()
-    provider:PreloadQuestDisambiguationAsync()
+  elseif not startupPreloadDeadline and provider.startupPreloadState == "waiting-world" then
+    startupPreloadDeadline = GetTime() + 15
+    provider.startupPreloadState = "waiting-identities"
   end
+end)
+addon:SetScript("OnUpdate", function()
+  if not startupPreloadDeadline or shuttingDown then return end
+  local now = GetTime()
+  if (startupPreloadTick or 0) > now then return end
+  startupPreloadTick = now + 0.25
+  local route = pfQuest and pfQuest.route
+  local point = route and route.coords and route.coords[1]
+  local routeReady = point and point[4] and not route.targetMissing
+  local resolved, unresolved = 0, false
+  for id in pairs(pfQuest and pfQuest.questlog or {}) do
+    if type(id) == "number" then resolved = resolved + 1 else unresolved = true end
+  end
+  local _, count = GetNumQuestLogEntries()
+  local settled = pfQuest and pfDatabase and pfDatabase.localized and not unresolved
+    and count ~= nil and resolved == count and (pfQuest.queueCount or 0) == 0
+    and not pfQuest.updateQuestLog
+  if settled then
+    startupPreloadSettledAt = startupPreloadSettledAt or now
+  else startupPreloadSettledAt = nil end
+  local ready = routeReady or (startupPreloadSettledAt and now >= startupPreloadSettledAt + 1)
+  if not ready and now < startupPreloadDeadline then return end
+  provider.startupPreloadState = ready and "started-after-active-quests" or "started-after-timeout"
+  provider.startupPreloadStartedAt = now
+  startupPreloadDeadline = nil
+  provider:PreloadQuestTitleIDsAsync()
+  provider:PreloadQuestDisambiguationAsync()
 end)
 
 if pfQuestHDBCompat then

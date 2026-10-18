@@ -34,7 +34,7 @@ local function CleanupPartyData()
 end
 
 local function RebuildQuestMappings(onComplete)
-    local hdbAvailable = pfQuestHearthDB and type(pfQuestHearthDB.GetQuestTargetsAsync) == "function"
+    local hdbAvailable = pfQuestHearthDB and type(pfQuestHearthDB.GetQuestObjectiveSummaryAsync or pfQuestHearthDB.GetQuestTargetsAsync) == "function"
     if not hdbAvailable and (not pfDB or not pfDB["quests"] or not pfDB["quests"]["data"] or not pfDB["quests"]["enUS"]) then
         if onComplete then onComplete() end
         return
@@ -100,7 +100,8 @@ local function RebuildQuestMappings(onComplete)
 
         for questId, active in pairs(activeQuestIds) do
             local currentQuestId, current = questId, active
-            pfQuestHearthDB:GetQuestTargetsAsync(currentQuestId, function(records, err)
+            local GetObjectives = pfQuestHearthDB.GetQuestObjectiveSummaryAsync or pfQuestHearthDB.GetQuestTargetsAsync
+            GetObjectives(pfQuestHearthDB, currentQuestId, function(records, err)
                 if not err and records then
                     local seen = {}
                     for _, target in ipairs(records) do

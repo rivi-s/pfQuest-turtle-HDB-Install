@@ -1,5 +1,14 @@
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest", {
+{ ["version"] = "0.2.0-beta.5", ["date"] = "2026-10-18", ["notes"] = {
+"Improved login loading with fairer background processing, current-zone previews, and shared objective summaries.",
+"Reduced unnecessary allocations and repeated work while decoding targets and building available quest markers.",
+"Prepared current-zone map pins while background data continues loading.",
+"Fixed minimap markers using the wrong map after closing the world map.",
+"Fixed automatic routing to service markers and corrected route ordering when another target becomes clearly closer.",
+"Fixed empty arrow-description punctuation and creatures with missing respawn timers.",
+"Retained support for the existing HearthDB DLL; the experimental DLL remains optional."
+} },
 { ["version"] = "0.2.0-beta.4", ["date"] = "2026-10-14", ["notes"] = {
 "Prioritized current-zone quest work and streamed target locations progressively while preserving complete provider caches.",
 "Retained unchanged markers during ordinary quest progress to reduce update hitches.",

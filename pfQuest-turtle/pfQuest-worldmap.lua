@@ -1,3 +1,8 @@
+-- The client can select Timbermaw Tunnels while the player is still outside
+-- its rectangle at the Felwood entrance. Felwood retains a valid position.
+pfMap.playerPositionFallbackMaps = pfMap.playerPositionFallbackMaps or {}
+pfMap.playerPositionFallbackMaps[1769] = 361
+
 local original_UpdateNodes = pfMap.UpdateNodes
 local original_UpdateNode = pfMap.UpdateNode
 
@@ -1217,7 +1222,10 @@ local function StartContinentRender(continent, viewKey)
 
 end
 
-function pfMap:UpdateNodes()
+function pfMap:UpdateNodes(initialRoute)
+    if type(initialRoute) == "table" and initialRoute.routeOnly then
+        return original_UpdateNodes(self, initialRoute)
+    end
     local continent = GetCurrentMapContinent()
     local zone = GetCurrentMapZone()
     local mapName = GetMapInfo and GetMapInfo() or "?"

@@ -1242,7 +1242,8 @@ function pfDatabase:SearchMobID(id, meta, maps, prio)
       meta["zone"] = zone
       meta["x"] = x
       meta["y"] = y
-      meta["respawn"] = respawn > 0 and SecondsToTime(respawn)
+      -- Summoned creatures can have a location without a respawn timer.
+      meta["respawn"] = respawn and respawn > 0 and SecondsToTime(respawn) or pfQuest_Loc["N/A"]
 
       maps[zone] = maps[zone] and maps[zone] + prio or prio
       pfMap:AddNode(meta)
