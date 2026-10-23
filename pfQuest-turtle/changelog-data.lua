@@ -2,6 +2,14 @@
 if not pfQuestChangelog then return end
 -- Published history and explicitly labeled development notes.
 pfQuestChangelog:Register("pfQuest-turtle", {
+{ ["version"] = "0.2.0-beta.6", ["date"] = "2026-10-23", ["notes"] = {
+"Corrected Weapons of Spirit to require both prerequisite branches.",
+"Restored Family Above All hut/nest markers and Lard Lost His Lunch basket marker.",
+"Linked Seeping Corruption vials to their individual tide pools.",
+"Added all four Poisoned Water transformation targets and Aspect of Neptulon use links.",
+"Added the reported Moonglade mailbox location and removed Grazle's obsolete northern positions.",
+"Nameplate loot icons now respect the configured minimum drop chance."
+} },
 { ["version"] = "0.2.0-beta.5", ["date"] = "2026-10-18", ["notes"] = {
 "Added a Felwood position fallback at the Timbermaw tunnel boundary when the client returns no tunnel coordinates.",
 "Added Nafien's tunnel position while retaining outdoor map locations.",

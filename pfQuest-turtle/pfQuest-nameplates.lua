@@ -12,6 +12,10 @@ local NAME_REGION_INDEX = 3
 local objectiveScanGeneration = 0
 local UpdateAllNameplates
 
+local function MeetsDropThreshold(chance)
+    return (tonumber(chance) or 0) >= (tonumber(pfQuest_config and pfQuest_config.mindropchance) or 0)
+end
+
 local function ScanQuestObjectives()
     questObjectives = {}
 
@@ -118,7 +122,7 @@ local function ScanQuestObjectives()
                             for _, activeObj in ipairs(currentObjectives) do
                                 local objective = activeObj.objective
                                 if type(objective) == "string" and (activeObj.current or 0) < (activeObj.total or 0) then
-                                    if target.originKind == "I" and target.itemTitle
+                                    if target.originKind == "I" and MeetsDropThreshold(target.chance) and target.itemTitle
                                       and string.find(objective, target.itemTitle, 1, true) then
                                         questObjectives[target.title] = BAG_ICON
                                     elseif (target.originKind or target.targetKind) == "U" then
@@ -178,7 +182,7 @@ local function ScanQuestObjectives()
 
                             if itemData["U"] then
                                 for unitId, dropRate in pairs(itemData["U"]) do
-                                    if pfDB["units"] and pfDB["units"]["enUS"] and pfDB["units"]["enUS"][unitId] then
+                                    if MeetsDropThreshold(dropRate) and pfDB["units"] and pfDB["units"]["enUS"] and pfDB["units"]["enUS"][unitId] then
                                         local npcName = pfDB["units"]["enUS"][unitId]
 
                                         for _, activeObj in ipairs(activeObjectives) do

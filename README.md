@@ -1,6 +1,6 @@
 # pfQuest-turtle-HDB-Install
 
-This 0.2.0-beta.5 installation layout includes the embedded HearthDB provider and
+This 0.2.0-beta.6 installation layout includes the embedded HearthDB provider and
 ready-made English SQLite database. The optional Russian language pack is distributed separately.
 The client still requires HearthDB support: https://github.com/copypasteonly/HearthDB
 

@@ -3,7 +3,7 @@
 ## Author: Shagu, Rivi
 ## Contributors: Gurky, Antealis, HumbleKagu, KasVital, Haaxor1689, IcemanHHW, fatpowaranga, Bennylavaa
 ## Notes: A TurtleWoW DB extension for pfQuest
-## Version: 0.2.0-beta.5
+## Version: 0.2.0-beta.6
 ## Dependencies: pfQuest
 ## SavedVariables: pfQuest_turtlecount
 
