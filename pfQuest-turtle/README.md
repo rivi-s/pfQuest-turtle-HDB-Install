@@ -1,89 +1,31 @@
 # pfQuest-turtle-HDB
 
-pfQuest-turtle-HDB adds Turtle WoW content and features to
-[pfQuest-HDB](https://github.com/rivi-s/pfQuest-HDB). It keeps the established
-pfQuest-turtle interface while reading both the Vanilla and Turtle data sets
-from one complete HearthDB SQLite database.
+Turtle WoW and RavenCraft quests, maps, and interface additions for pfQuest-HDB. Its combined English SQLite database includes Vanilla and Turtle content.
 
-This is an early English-only alpha for World of Warcraft 1.12. It requires a
-client with [HearthDB](https://github.com/copypasteonly/HearthDB) support and the matching pfQuest-HDB alpha. For the regular
-Lua-database addon, use the
-[live pfQuest-turtle project](https://github.com/rivi-s/pfQuest-turtle).
+HDB requests data as needed instead of loading the full gameplay database into Lua at login. Queries run asynchronously, but result decoding, map work, and garbage collection can still cause pauses. First-time results may arrive after a short delay and are cached for the session.
 
-## What is included
+## Install
 
-- Turtle WoW quests, units, objects, items, spawns, and database corrections
-- Turtle quest filters and world-map additions
-- quest nameplate objectives
-- party objective progress
-- unit loot panels
-- one merged English database containing Vanilla and Turtle records
+For normal play, use **[pfQuest-turtle-HDB-Install](https://github.com/rivi-s/pfQuest-turtle-HDB-Install)**. It includes the ready-made SQLite database and the correct addon folder layout. This repository is the source tree.
 
-The shared quest, map, journal, browser, tracker, and HearthDB adapter code lives
-in pfQuest-HDB. This repository contains the Turtle-specific extension and the
-tools needed to build its complete database.
+HearthDB client support is required. The existing DLL works; [0.4.1-exp.3](https://github.com/rivi-s/HearthDB/releases/tag/v0.4.1-exp.3) is an optional experimental DLL. The main HDB package uses English data. The [optional Russian pack](https://github.com/rivi-s/pfQuest-turtle-HDB/blob/main/modules/pfQuest-turtle-HDB-ruRU/README.md) is separate; check its matching-version requirements. There is no Lua database fallback.
 
-## Install (embedded-provider development layout)
+Read the [setup, updating, troubleshooting, and hitch-capture guide](https://github.com/rivi-s/pfQuest-HDB/blob/main/SUPPORT.md). The [regular edition](https://github.com/rivi-s/pfQuest-turtle) uses Lua data and needs no HearthDB DLL.
 
-This unreleased layout embeds the HearthDB provider in the HDB addon folders.
-Existing published alpha ZIPs still use their original separate provider layout.
-Use the matching ready-to-install repository for this layout once published.
+## Features and reports
 
-Close the client and replace the HDB addon folders. Remove legacy
-`pfQuest-HearthDB` and `pfQuest-HearthDB-turtle` folders when upgrading.
-Do not replace character settings in `WTF`.
+Quest objectives and turn-ins appear on the world map and minimap. Use `/db config` for settings, `/db show` for the browser, `/db journal` for the journal, and `/pfqhdb` for provider status. The extension also supplies Turtle map additions, nameplate objectives, party progress, and loot panels.
 
-Turtle uses `pfQuest` and `pfQuest-turtle`; vanilla uses only `pfQuest`.
+[Report an issue](https://github.com/rivi-s/pfQuest-turtle-HDB/issues) with addon/DLL versions, quest or entity ID, character level/faction, map name, coordinates, and whether the problem affects an offer, objective, or turn-in. Use the [report checklist](https://github.com/rivi-s/pfQuest-HDB/blob/main/SUPPORT.md#report-a-problem) for details.
 
-The SQLite database belongs at `pfQuest-turtle/provider/data/pfquest-turtle.sqlite`.
-The client still needs [HearthDB](https://github.com/copypasteonly/HearthDB)
-installed. No separate provider addon is needed. Large Lua database files remain
-outside the active load manifests; there is no Lua database fallback.
+## Project status
 
-Restart and run `/pfqhdb`: it reports the database-owning addon and whether the
-database opened. `/pfqhdb cacheclear` clears session query caches.
+Maintenance focuses on occasional database corrections and reported bugs. Updates have no fixed schedule. Compatibility with Raven's Classic Era 1.14 client is unverified; work on that port is paused. These packages target the existing 1.12 client.
 
-## Reporting alpha bugs
+## Build from source
 
-Include the quest or entity name, zone, affected feature, and full Lua error.
-For map problems, say whether the issue appeared on the continent map, zone map,
-or minimap. For party progress, include which character had the quest and which
-character's tooltip was being viewed. For a delay, note whether it occurred only
-on the first request or every time.
+Generated SQLite files belong in install bundles, not source history. See [HDB.md](HDB.md) and [provider build details](provider/README.md) for database generation and layout.
 
-Content comes from the available Turtle database export plus the maintained
-pfQuest-turtle corrections. A missing or incorrect record may therefore be a
-source-data problem rather than a rendering problem, but both are useful alpha
-reports.
+## Credits
 
-## Building the complete Turtle database
-
-The provider source is under `provider/`. Supply both source trees so the output
-contains the Vanilla base and Turtle additions:
-
-```sh
-cd provider
-python3 tools/build_database.py \
-  --source /path/to/pfQuest-HDB \
-  --turtle-source /path/to/pfQuest-turtle-HDB \
-  --locales enUS \
-  --output data/pfquest-turtle.sqlite
-sqlite3 data/pfquest-turtle.sqlite 'PRAGMA integrity_check;'
-```
-
-Generated databases are intentionally excluded from Git. They belong in alpha
-release packages so the Vanilla and Turtle repositories remain usable source
-trees. See [HDB.md](HDB.md) and [provider/README.md](provider/README.md) for more
-detail.
-
-## Project background
-
-pfQuest-turtle extends [pfQuest](https://github.com/shagu/pfQuest) with Turtle
-WoW support. This HDB edition follows the live pfQuest-turtle history and keeps
-Turtle-specific behavior here while shared behavior remains in pfQuest-HDB.
-
-## Author credits
-
-Original pfQuest-turtle author: Shagu. Existing contributors are listed in the addon TOC.
-
-Rivi maintains this fork and contributes ongoing fixes, features, quest database corrections, and HearthDB integration.
+Original pfQuest authors: Shagu and txtsd. Original Turtle extension: Shagu, with contributors listed in the addon TOC. Rivi maintains these forks and contributes features, database corrections, and HearthDB integration.

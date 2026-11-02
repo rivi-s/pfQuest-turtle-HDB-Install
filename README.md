@@ -1,32 +1,42 @@
 # pfQuest-turtle-HDB-Install
 
-This 0.2.0-beta.6 installation layout includes the embedded HearthDB provider and
-ready-made English SQLite database. The optional Russian language pack is distributed separately.
-The client still requires HearthDB support: https://github.com/copypasteonly/HearthDB
+Turtle WoW and RavenCraft quests, maps, and interface additions for pfQuest-HDB. Its combined English SQLite database includes Vanilla and Turtle content.
+
+This ready-to-install bundle includes the embedded provider and English SQLite database. Both addon folders are included. The optional Russian pack is distributed separately.
+
+## Choose an edition
+
+| Edition | Install | Requirements |
+| --- | --- | --- |
+| Regular pfQuest | [pfQuest](https://github.com/rivi-s/pfQuest) | Loads its database in Lua; no HearthDB DLL required. |
+| Regular Turtle/Raven content | [pfQuest-turtle](https://github.com/rivi-s/pfQuest-turtle) alongside regular pfQuest | Both regular addon folders. |
+| HDB Vanilla | [pfQuest-HDB-Install](https://github.com/rivi-s/pfQuest-HDB-Install) | HearthDB client component; English database included. |
+| HDB Turtle/Raven content | [pfQuest-turtle-HDB-Install](https://github.com/rivi-s/pfQuest-turtle-HDB-Install) | HearthDB client component; both addon folders and combined English database included. |
+
+Install one edition at a time. Both editions use the folder names `pfQuest` and `pfQuest-turtle`; mixing regular and HDB folders can leave the wrong database or code loaded.
 
 ## Install or update
 
-1. Close World of Warcraft.
-2. Download and extract this repository's ZIP.
-3. Remove the old `pfQuest` and `pfQuest-turtle` addon folders.
-4. Remove legacy `pfQuest-HearthDB` and `pfQuest-HearthDB-turtle` addon folders.
-5. Copy `pfQuest` and `pfQuest-turtle` from this package into `Interface/AddOns`.
-6. Restart and run `/pfqhdb` to verify the database opened.
+1. Fully close World of Warcraft. Preserve your `WTF` settings and back up addon folders when switching editions.
+2. Download **[this install bundle](https://github.com/rivi-s/pfQuest-turtle-HDB-Install/archive/refs/heads/main.zip)** and extract it.
+3. Replace `pfQuest` and `pfQuest-turtle` in `Interface/AddOns` with the inner addon folders from this bundle. Remove the old folders first so obsolete files are not left behind.
+4. Remove legacy `pfQuest-HearthDB` and `pfQuest-HearthDB-turtle` provider folders. Any small inactive compatibility stubs included in the bundle are migration files, not required providers.
+5. Confirm the client has HearthDB support, restart, enable the addons, and run `/pfqhdb` to verify the database opened.
 
-Settings in `WTF` are preserved. There is no separate provider addon or large
-Lua database loading. This edition requires HearthDB and has no Lua fallback.
+The database belongs at `pfQuest-turtle/provider/data/pfquest-turtle.sqlite` inside `Interface/AddOns`. The Turtle database includes Vanilla content; install both folders from this bundle.
 
-The combined SQLite database is inside `pfQuest-turtle/provider/data/pfquest-turtle.sqlite`.
+## DLL and diagnostics
 
-## Legacy provider compatibility
+The existing HearthDB DLL remains supported. The [0.4.1-exp.3 DLL](https://github.com/rivi-s/HearthDB/releases/tag/v0.4.1-exp.3) is an optional separate download. This bundle does not install a DLL or plugin loader. Fully exit the game before replacing a DLL; `/reload` cannot replace it. HDB requires the client component and has no Lua database fallback.
 
-Leftover pfQuest-HearthDB and pfQuest-HearthDB-turtle addons cannot open their
-old databases or retain ownership of the embedded API/status command. This
-protection works even when installers leave the old runtime files unchanged.
-Unrelated addons using HearthDB are unaffected. Install bundles also include
-tiny inactive load-on-demand stubs at both old addon paths for in-place updates.
-They are migration files, not required providers. Old tools/data left on disk
-are not used. Cleanup is recommended; untouched old addons may still print
-their own database-open failure messages.
+The included `pfQuest-HDB-HitchProfiler` is optional. Login capture defaults to off for new installations. Enable the diagnostic addon only when needed; `/hdbhitch on` starts a manual capture and `/hdbhitch off` stops it. See [SUPPORT.md](SUPPORT.md) for login options, manual log paths, troubleshooting, and reporting.
 
-The existing HearthDB DLL is supported. The experimental 0.4.1-exp.3 DLL is optional and distributed separately.
+## Project status
+
+Maintenance focuses on occasional database corrections and reported bugs. Updates have no fixed schedule. Compatibility with Raven's Classic Era 1.14 client is unverified; work on that port is paused. These packages target the existing 1.12 client.
+
+## Source and credits
+
+Addon source: [pfQuest-HDB](https://github.com/rivi-s/pfQuest-HDB) and [pfQuest-turtle-HDB](https://github.com/rivi-s/pfQuest-turtle-HDB).
+
+Original pfQuest authors: Shagu and txtsd. Original Turtle extension: Shagu, with contributors listed in the addon TOC. Rivi maintains these forks and contributes features, database corrections, and HearthDB integration.

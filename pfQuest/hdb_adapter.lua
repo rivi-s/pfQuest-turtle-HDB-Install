@@ -1033,6 +1033,7 @@ function pfDatabase:FilterHDBAvailableStartPins(pins, activeTitles)
     local pin = pins[index]
     local eligible = pin.questID and not pfDatabase:IsQuestOfferExcluded(pin.questID)
       and not pfDatabase:IsBreadcrumbBlocked(pin.questID)
+      and not pfDatabase:IsQuestExclusiveBlocked(pin.questID)
       and not (pfQuest.questlog and pfQuest.questlog[pin.questID])
       and not activeTitles[pin.quest]
       and (not pfQuest_history[pin.questID] or pin.repeatable)

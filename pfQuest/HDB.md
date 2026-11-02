@@ -36,4 +36,4 @@ their own database-open failure messages.
 The existing HearthDB DLL remains supported through bounded SQL paging. The
 optional experimental 0.4.1-exp.3 DLL enables incremental native result delivery;
 it is distributed separately and is not required to install this addon update.
-The development hitch profiler is not part of the addon package.
+The install repositories currently include the optional Hitch Profiler 1.0.3 addon. Login capture defaults to off for new installations; see the [diagnostic guide](https://github.com/rivi-s/pfQuest-HDB/blob/main/SUPPORT.md#capture-a-hitch).
